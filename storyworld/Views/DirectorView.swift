@@ -115,7 +115,7 @@ struct DirectorView: View {
                         Image(systemName: "plus")
                             .font(.caption2)
                             .foregroundStyle(.white)
-                        Slider(value: $scaleValue, in: 0.2...3.0)
+                        Slider(value: $scaleValue, in: 0.05...3.0)
                             .frame(width: 180)
                             .rotationEffect(.degrees(-90))
                             .frame(width: 30, height: 180)
@@ -750,7 +750,7 @@ struct TransformControlPanel: View {
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .tracking(1)
                             .foregroundStyle(.white.opacity(0.7))
-                        Slider(value: $characterScale, in: 0.2...3.0, step: 0.01)
+                        Slider(value: $characterScale, in: 0.05...3.0, step: 0.01)
                             .onChange(of: characterScale) { _, newValue in
                                 onCharacterScaleChanged(newValue, slot)
                             }
@@ -895,7 +895,7 @@ struct IdlePanel: View {
                         }
                         .disabled(!hasSurface || worldDone)
 
-                        DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .primary) {
+                        DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .secondary) {
                             showingCharacterPicker = true
                         }
                         .disabled(!hasSurface || worldGenerating || (knightDone && monsterDone))

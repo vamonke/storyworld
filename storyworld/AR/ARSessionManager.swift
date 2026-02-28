@@ -251,7 +251,7 @@ final class ARSessionManager: ARSceneProtocol {
     }
 
     func setCharacterScaleMultiplier(_ multiplier: Float, slot: CharacterSlot) {
-        let clamped = max(multiplier, 0.1)
+        let clamped = max(multiplier, 0.05)
         characterScaleMultipliers[slot] = clamped
         placedCharacters[slot]?.scale = SIMD3<Float>(repeating: 0.3 * clamped)
     }

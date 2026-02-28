@@ -47,7 +47,7 @@ struct ARDirectorView: View {
                         Image(systemName: "plus")
                             .font(.caption2)
                             .foregroundStyle(.white)
-                        Slider(value: $scaleValue, in: 0.2...3.0)
+                        Slider(value: $scaleValue, in: 0.05...3.0)
                             .frame(width: 180)
                             .rotationEffect(.degrees(-90))
                             .frame(width: 30, height: 180)
