@@ -176,15 +176,19 @@ struct DirectorView: View {
                 store: store,
                 hasSurface: hasSurface,
                 selectedWorldPreset: $selectedWorldPreset,
+                worldOffset: $worldPlaneOffset,
                 placementSlot: currentPlacementSlot,
                 statusMessage: placementStatusMessage,
                 onCaptureShot: captureShot,
                 onCapturePhoto: capturePhoto,
                 onPlaceCharacter: handlePlacementTap,
                 onSetWorld: setWorld,
+                worldStatus: store.session.environment?.status ?? .idle,
+                onWorldOffsetChanged: { arManager.setWorldPlaneYOffset(Float($0)) },
+                onRemoveWorld: removeWorld,
+                onOpenWorldSettings: { worldPlaneOffset = Double(arManager.worldPlaneYOffsetValue) },
                 onOpenGallery: { showingGallery = true },
                 onExitDirector: exitDirectorMode,
-                onTapWorldBadge: openWorldControls,
                 onTapHeroBadge: { openCharacterControls(slot: .hero) },
                 onTapVillainBadge: { openCharacterControls(slot: .villain) }
             )
@@ -297,8 +301,10 @@ struct DirectorView: View {
                     }
                     let loaded = try await ModelEntity(contentsOf: url)
                     if url.lastPathComponent.hasPrefix(devSampleTextTo3DDownloadedFilenamePrefix) {
+                        let xAxisFix = simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0))
                         let zAxisFix = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
-                        loaded.orientation = simd_mul(zAxisFix, loaded.orientation)
+                        let extraXAxisFix = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+                        loaded.orientation = simd_mul(extraXAxisFix, simd_mul(zAxisFix, simd_mul(xAxisFix, loaded.orientation)))
                     }
                     loaded.generateCollisionShapes(recursive: true)
                     baseEntities[slot] = loaded
@@ -380,15 +386,6 @@ struct DirectorView: View {
         )
     }
 
-    private func openWorldControls() {
-        if activeTransformTarget == .world {
-            activeTransformTarget = nil
-            return
-        }
-        worldPlaneOffset = Double(arManager.worldPlaneYOffsetValue)
-        activeTransformTarget = .world
-    }
-
     private func openCharacterControls(slot: CharacterSlot) {
         let target: TransformControlTarget = (slot == .hero) ? .hero : .villain
         if activeTransformTarget == target {
@@ -431,15 +428,19 @@ struct DirectorHUD: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
     @Binding var selectedWorldPreset: WorldPreset?
+    @Binding var worldOffset: Double
     let placementSlot: CharacterSlot?
     let statusMessage: String
     let onCaptureShot: (CameraAngle) -> Void
     let onCapturePhoto: () -> Void
     let onPlaceCharacter: () -> Void
     let onSetWorld: (WorldPreset) -> Void
+    let worldStatus: GenerationStatus
+    let onWorldOffsetChanged: (Double) -> Void
+    let onRemoveWorld: () -> Void
+    let onOpenWorldSettings: () -> Void
     let onOpenGallery: () -> Void
     let onExitDirector: () -> Void
-    let onTapWorldBadge: () -> Void
     let onTapHeroBadge: () -> Void
     let onTapVillainBadge: () -> Void
 
@@ -493,7 +494,6 @@ struct DirectorHUD: View {
 
                 GenerationStatusRow(
                     session: store.session,
-                    onTapWorld: onTapWorldBadge,
                     onTapHero: onTapHeroBadge,
                     onTapVillain: onTapVillainBadge
                 )
@@ -522,11 +522,16 @@ struct DirectorHUD: View {
                     store: store,
                     hasSurface: hasSurface,
                     selectedWorldPreset: $selectedWorldPreset,
+                    worldOffset: $worldOffset,
                     placementSlot: placementSlot,
                     onCaptureShot: onCaptureShot,
                     onCapturePhoto: onCapturePhoto,
                     onPlaceCharacter: onPlaceCharacter,
-                    onSetWorld: onSetWorld
+                    onSetWorld: onSetWorld,
+                    worldStatus: worldStatus,
+                    onWorldOffsetChanged: onWorldOffsetChanged,
+                    onRemoveWorld: onRemoveWorld,
+                    onOpenWorldSettings: onOpenWorldSettings
                 )
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
@@ -604,13 +609,11 @@ struct BreathingDot: View {
 
 struct GenerationStatusRow: View {
     let session: FilmSession
-    let onTapWorld: () -> Void
     let onTapHero: () -> Void
     let onTapVillain: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            AssetBadge(label: "World", status: session.environment?.status ?? .idle, icon: "globe", action: onTapWorld)
             if let hero = session.hero {
                 AssetBadge(label: hero.name, status: hero.status, icon: "figure.stand", action: onTapHero)
             }
@@ -843,11 +846,16 @@ struct ActionPanel: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
     @Binding var selectedWorldPreset: WorldPreset?
+    @Binding var worldOffset: Double
     let placementSlot: CharacterSlot?
     let onCaptureShot: (CameraAngle) -> Void
     let onCapturePhoto: () -> Void
     let onPlaceCharacter: () -> Void
     let onSetWorld: (WorldPreset) -> Void
+    let worldStatus: GenerationStatus
+    let onWorldOffsetChanged: (Double) -> Void
+    let onRemoveWorld: () -> Void
+    let onOpenWorldSettings: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -858,8 +866,13 @@ struct ActionPanel: View {
                     store: store,
                     hasSurface: hasSurface,
                     selectedWorldPreset: $selectedWorldPreset,
+                    worldOffset: $worldOffset,
                     onCapturePhoto: onCapturePhoto,
-                    onSetWorld: onSetWorld
+                    onSetWorld: onSetWorld,
+                    worldStatus: worldStatus,
+                    onWorldOffsetChanged: onWorldOffsetChanged,
+                    onRemoveWorld: onRemoveWorld,
+                    onOpenWorldSettings: onOpenWorldSettings
                 )
 
             case .generatingWorld:
@@ -870,8 +883,13 @@ struct ActionPanel: View {
                     store: store,
                     hasSurface: hasSurface,
                     selectedWorldPreset: $selectedWorldPreset,
+                    worldOffset: $worldOffset,
                     onCapturePhoto: onCapturePhoto,
-                    onSetWorld: onSetWorld
+                    onSetWorld: onSetWorld,
+                    worldStatus: worldStatus,
+                    onWorldOffsetChanged: onWorldOffsetChanged,
+                    onRemoveWorld: onRemoveWorld,
+                    onOpenWorldSettings: onOpenWorldSettings
                 )
 
             case .generatingCharacter:
@@ -891,8 +909,13 @@ struct ActionPanel: View {
                     store: store,
                     hasSurface: hasSurface,
                     selectedWorldPreset: $selectedWorldPreset,
+                    worldOffset: $worldOffset,
                     onCapturePhoto: onCapturePhoto,
-                    onSetWorld: onSetWorld
+                    onSetWorld: onSetWorld,
+                    worldStatus: worldStatus,
+                    onWorldOffsetChanged: onWorldOffsetChanged,
+                    onRemoveWorld: onRemoveWorld,
+                    onOpenWorldSettings: onOpenWorldSettings
                 )
 
             case .generatingClip:
@@ -911,8 +934,13 @@ struct IdlePanel: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
     @Binding var selectedWorldPreset: WorldPreset?
+    @Binding var worldOffset: Double
     let onCapturePhoto: () -> Void
     let onSetWorld: (WorldPreset) -> Void
+    let worldStatus: GenerationStatus
+    let onWorldOffsetChanged: (Double) -> Void
+    let onRemoveWorld: () -> Void
+    let onOpenWorldSettings: () -> Void
     @State private var showingWorldPicker = false
     @State private var showingCharacterPicker = false
     @State private var selectedCharacterOption: CharacterCreationOption = .soldier
@@ -924,10 +952,10 @@ struct IdlePanel: View {
     @State private var typingTask: Task<Void, Never>?
 
     var body: some View {
-        let worldDone = store.session.environment?.status == .ready || store.session.environment?.status == .placed
+        let worldDone = worldStatus == .ready || worldStatus == .placed
         let objectAAdded = store.session.hero?.status == .ready || store.session.hero?.status == .placed
         let objectBAdded = store.session.villain?.status == .ready || store.session.villain?.status == .placed
-        let worldGenerating = store.session.phase == .generatingWorld
+        let worldGenerating = worldStatus == .queued || worldStatus == .generating || store.session.phase == .generatingWorld
         let objectAGenerating = store.session.hero?.status == .queued || store.session.hero?.status == .generating
         let objectBGenerating = store.session.villain?.status == .queued || store.session.villain?.status == .generating
         let characterGenerating = objectAGenerating || objectBGenerating || store.session.phase == .generatingCharacter
@@ -945,7 +973,7 @@ struct IdlePanel: View {
         GlassPanel {
             if showingWorldPicker {
                 VStack(spacing: 10) {
-                    PanelTitle("SET WORLD")
+                    PanelTitle("WORLD")
 
                     HStack(spacing: 8) {
                         ForEach(WorldPreset.allCases) { preset in
@@ -953,7 +981,6 @@ struct IdlePanel: View {
                             Button {
                                 selectedWorldPreset = preset
                                 onSetWorld(preset)
-                                showingWorldPicker = false
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: preset.icon)
@@ -980,11 +1007,27 @@ struct IdlePanel: View {
                     }
                     .animation(nil, value: selectedWorldPreset)
 
-                    if worldDone {
-                        Text("World is already in scene.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("WORLD Y")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .tracking(1)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Slider(value: $worldOffset, in: -0.6...0.2, step: 0.01)
+                            .onChange(of: worldOffset) { _, newValue in
+                                onWorldOffsetChanged(newValue)
+                            }
+                        Text(String(format: "%.2f m", worldOffset))
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.45))
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+
+                    if worldDone {
+                        DirectorButton(
+                            label: "REMOVE WORLD",
+                            icon: "trash",
+                            style: .ghost,
+                            action: onRemoveWorld
+                        )
                     }
 
                     DirectorButton(label: "BACK", icon: "arrow.left", style: .ghost) {
@@ -1062,19 +1105,11 @@ struct IdlePanel: View {
                                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.1), lineWidth: 0.5))
                                 )
 
-                            if isHoldingVoiceInput {
-                                Text("Listening... release to insert")
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.green)
-                            } else if isProcessingVoiceInput {
-                                Text("Transcribing...")
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.white.opacity(0.65))
-                            } else if let voiceErrorMessage {
-                                Text(voiceErrorMessage)
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.orange)
-                            }
+                            Text(customCharacterVoiceStatusText)
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(customCharacterVoiceStatusColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1)
                         }
                     }
 
@@ -1127,10 +1162,10 @@ struct IdlePanel: View {
                     }
 
                     HStack(spacing: 10) {
-                        DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
+                        DirectorButton(label: "WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
+                            onOpenWorldSettings()
                             showingWorldPicker = true
                         }
-                        .disabled(worldDone)
 
                         DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .secondary) {
                             showingCharacterPicker = true
@@ -1239,6 +1274,20 @@ struct IdlePanel: View {
         voiceErrorMessage = nil
         typingTask?.cancel()
         typingTask = nil
+    }
+
+    private var customCharacterVoiceStatusText: String {
+        if isHoldingVoiceInput { return "Listening... release to insert" }
+        if isProcessingVoiceInput { return "Transcribing..." }
+        if let voiceErrorMessage { return voiceErrorMessage }
+        return "-"
+    }
+
+    private var customCharacterVoiceStatusColor: Color {
+        if isHoldingVoiceInput { return .green }
+        if isProcessingVoiceInput { return .white.opacity(0.65) }
+        if voiceErrorMessage != nil { return .orange }
+        return .white.opacity(0.3)
     }
 }
 
@@ -2079,6 +2128,19 @@ struct ReviewPanel: View {
 
 struct NotificationToast: View {
     let notification: DirectorNotification
+    @State private var isExpanded = false
+
+    private var isErrorNotification: Bool {
+        notification.icon == "exclamationmark.triangle" ||
+        notification.message.contains("⚠️") ||
+        notification.message.localizedCaseInsensitiveContains("failed")
+    }
+
+    private var shouldClamp: Bool {
+        isErrorNotification && !isExpanded
+    }
+
+    private let toastMaxWidth: CGFloat = 460
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2088,14 +2150,30 @@ struct NotificationToast: View {
             Text(notification.message)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(shouldClamp ? 1 : nil)
+                .truncationMode(.tail)
+                .multilineTextAlignment(.leading)
+            if isErrorNotification {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
         }
+        .frame(maxWidth: toastMaxWidth, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background(
-            Capsule()
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.black.opacity(0.75))
-                .overlay(Capsule().stroke(.white.opacity(0.1), lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(0.1), lineWidth: 0.5))
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isErrorNotification else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        }
     }
 }
 
