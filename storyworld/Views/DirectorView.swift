@@ -2140,7 +2140,7 @@ struct NotificationToast: View {
         isErrorNotification && !isExpanded
     }
 
-    private let toastMaxWidth: CGFloat = 460
+    private let toastMaxWidth: CGFloat = 320
 
     var body: some View {
         HStack(spacing: 8) {

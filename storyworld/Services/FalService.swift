@@ -171,8 +171,8 @@ actor FalService {
             "prompt": .string(prompt),
             "image_urls": .array([.string(dataURI)]),
             "image_size": .string("auto"),
-            "safety_tolerance": .string("2"),
-            "enable_safety_checker": .bool(true),
+            "safety_tolerance": .string("5"),
+            "enable_safety_checker": .bool(false),
             "output_format": .string("jpeg")
         ])
 
