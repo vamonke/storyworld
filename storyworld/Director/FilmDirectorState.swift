@@ -225,6 +225,21 @@ struct ARMemoryPhoto: Identifiable, Codable {
     }
 }
 
+struct ARMemoryVideo: Identifiable, Codable {
+    let id: UUID
+    var sourcePhotoId: UUID
+    var prompt: String
+    var thumbnailImageData: Data
+    var capturedAt: Date
+    var processingStatus: MemoryPhotoProcessingStatus
+    var processingError: String?
+    var videoURL: URL?
+
+    var thumbnailImage: UIImage? {
+        UIImage(data: thumbnailImageData)
+    }
+}
+
 // MARK: - Full Session State
 
 struct FilmSession: Codable {
@@ -239,6 +254,7 @@ struct FilmSession: Codable {
     var shots: [ARShot] = []          // ordered by capture time
     var clips: [ARClip] = []          // can have multiple clips
     var photos: [ARMemoryPhoto] = []  // in-memory gallery
+    var videos: [ARMemoryVideo] = []  // in-memory gallery
 
     // Derived
     var allCharacters: [ARCharacter] {
@@ -257,8 +273,17 @@ struct FilmSession: Codable {
     var canShoot: Bool    { true }
     var canGenerate: Bool { shots.count >= 3 }
     var hasPhotos: Bool   { !photos.isEmpty }
-    var processingPhotosCount: Int { photos.filter { $0.processingStatus == .processing }.count }
-    var failedPhotosCount: Int { photos.filter { $0.processingStatus == .failed }.count }
+    var processingPhotosCount: Int { processingMediaCount }
+    var failedPhotosCount: Int { failedMediaCount }
+    var hasMedia: Bool { !photos.isEmpty || !videos.isEmpty }
+    var processingMediaCount: Int {
+        photos.filter { $0.processingStatus == .processing }.count
+        + videos.filter { $0.processingStatus == .processing }.count
+    }
+    var failedMediaCount: Int {
+        photos.filter { $0.processingStatus == .failed }.count
+        + videos.filter { $0.processingStatus == .failed }.count
+    }
 
     var activeClip: ARClip? { clips.last }
     var latestReadyClip: ARClip? { clips.last(where: { $0.status == .ready }) }
@@ -295,7 +320,11 @@ enum DirectorAction {
     case captureMemoryPhoto(image: UIImage)
     case memoryPhotoCinematicReady(id: UUID, imageData: Data)
     case memoryPhotoCinematicFailed(id: UUID, error: String)
+    case animateMemoryPhoto(id: UUID, prompt: String)
+    case memoryVideoReady(id: UUID, videoURL: URL)
+    case memoryVideoFailed(id: UUID, error: String)
     case deleteMemoryPhoto(id: UUID)
+    case deleteMemoryVideo(id: UUID)
 
     // Clip generation
     case generateClip(shotIds: [UUID], style: CinematicStyle)
@@ -592,8 +621,55 @@ final class FilmDirectorStore: ObservableObject {
             session.photos[idx].processingError = error
             notify("⚠️ Photo cinematic failed: \(error)", icon: "exclamationmark.triangle")
 
+        case .animateMemoryPhoto(let id, let prompt):
+            guard let photo = session.photos.first(where: { $0.id == id }) else { return }
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPrompt.isEmpty else { return }
+
+            let videoId = UUID()
+            let video = ARMemoryVideo(
+                id: videoId,
+                sourcePhotoId: id,
+                prompt: trimmedPrompt,
+                thumbnailImageData: photo.imageData,
+                capturedAt: Date(),
+                processingStatus: .processing,
+                processingError: nil,
+                videoURL: nil
+            )
+            session.videos.insert(video, at: 0)
+            notify("🎞️ Animation queued", icon: "sparkles")
+
+            Task {
+                do {
+                    let videoURL = try await generationService.animateImageToVideo(
+                        imageData: photo.imageData,
+                        prompt: trimmedPrompt
+                    )
+                    dispatch(.memoryVideoReady(id: videoId, videoURL: videoURL))
+                } catch {
+                    dispatch(.memoryVideoFailed(id: videoId, error: error.localizedDescription))
+                }
+            }
+
+        case .memoryVideoReady(let id, let videoURL):
+            guard let idx = session.videos.firstIndex(where: { $0.id == id }) else { return }
+            session.videos[idx].videoURL = videoURL
+            session.videos[idx].processingStatus = .ready
+            session.videos[idx].processingError = nil
+            notify("🎬 Animation ready", icon: "play.rectangle.fill")
+
+        case .memoryVideoFailed(let id, let error):
+            guard let idx = session.videos.firstIndex(where: { $0.id == id }) else { return }
+            session.videos[idx].processingStatus = .failed
+            session.videos[idx].processingError = error
+            notify("⚠️ Animation failed: \(error)", icon: "exclamationmark.triangle")
+
         case .deleteMemoryPhoto(let id):
             session.photos.removeAll { $0.id == id }
+
+        case .deleteMemoryVideo(let id):
+            session.videos.removeAll { $0.id == id }
 
         // MARK: Clip
 
@@ -809,6 +885,7 @@ final class FilmDirectorStore: ObservableObject {
                 ["index": $0.index, "angle": $0.cameraAngle.rawValue]
             },
             "photosCount": session.photos.count,
+            "videosCount": session.videos.count,
             "clipsCount": session.clips.count,
             "canShoot": session.canShoot,
             "canGenerate": session.canGenerate,
@@ -823,6 +900,7 @@ protocol GenerationServiceProtocol {
     func generateCharacter(_ prompt: String) async throws -> URL
     func generateClip(frames: [UIImage], shots: [ARShot], style: CinematicStyle, audioPrompt: String) async throws -> URL
     func enhanceShotCinematic(imageData: Data, prompt: String) async throws -> Data
+    func animateImageToVideo(imageData: Data, prompt: String) async throws -> URL
 }
 
 protocol ARSceneProtocol {
@@ -978,6 +1056,11 @@ final class MockGenerationService: GenerationServiceProtocol {
     func enhanceShotCinematic(imageData: Data, prompt: String) async throws -> Data {
         imageData
     }
+
+    func animateImageToVideo(imageData: Data, prompt: String) async throws -> URL {
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        return URL(string: "https://example.com/animation.mp4")!
+    }
 }
 
 final class HybridGenerationService: GenerationServiceProtocol {
@@ -1006,5 +1089,9 @@ final class HybridGenerationService: GenerationServiceProtocol {
 
     func enhanceShotCinematic(imageData: Data, prompt: String) async throws -> Data {
         try await falService.cinematicShotFlux2Pro(imageData: imageData, prompt: prompt)
+    }
+
+    func animateImageToVideo(imageData: Data, prompt: String) async throws -> URL {
+        try await falService.animateImageSeedanceFast(imageData: imageData, prompt: prompt)
     }
 }

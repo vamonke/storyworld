@@ -2,6 +2,7 @@ import SwiftUI
 import RealityKit
 import Combine
 import AudioToolbox
+import AVKit
 
 enum TransformControlTarget: Equatable {
     case world
@@ -1142,10 +1143,52 @@ struct PhotoCapturePanel: View {
     }
 }
 
+enum GalleryMediaKind {
+    case photo
+    case video
+}
+
+struct GalleryMediaItem: Identifiable {
+    let id: UUID
+    let kind: GalleryMediaKind
+    let capturedAt: Date
+    let previewImage: UIImage?
+    let processingStatus: MemoryPhotoProcessingStatus
+    let processingError: String?
+    let photoId: UUID?
+    let videoURL: URL?
+
+    nonisolated init(photo: ARMemoryPhoto) {
+        self.id = photo.id
+        self.kind = .photo
+        self.capturedAt = photo.capturedAt
+        self.previewImage = UIImage(data: photo.imageData)
+        self.processingStatus = photo.processingStatus
+        self.processingError = photo.processingError
+        self.photoId = photo.id
+        self.videoURL = nil
+    }
+
+    nonisolated init(video: ARMemoryVideo) {
+        self.id = video.id
+        self.kind = .video
+        self.capturedAt = video.capturedAt
+        self.previewImage = UIImage(data: video.thumbnailImageData)
+        self.processingStatus = video.processingStatus
+        self.processingError = video.processingError
+        self.photoId = video.sourcePhotoId
+        self.videoURL = video.videoURL
+    }
+
+    var isVideo: Bool {
+        kind == .video
+    }
+}
+
 struct PhotoGalleryView: View {
     @ObservedObject var store: FilmDirectorStore
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPhotoIndex: Int?
+    @State private var selectedMediaIndex: Int?
 
     private let columns: [GridItem] = [
         GridItem(.flexible(), spacing: 8),
@@ -1153,14 +1196,20 @@ struct PhotoGalleryView: View {
         GridItem(.flexible(), spacing: 8)
     ]
 
-    private var processingCount: Int { store.session.processingPhotosCount }
-    private var failedCount: Int { store.session.failedPhotosCount }
+    private var mediaItems: [GalleryMediaItem] {
+        let photoItems = store.session.photos.map(GalleryMediaItem.init(photo:))
+        let videoItems = store.session.videos.map(GalleryMediaItem.init(video:))
+        return (photoItems + videoItems).sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    private var processingCount: Int { store.session.processingMediaCount }
+    private var failedCount: Int { store.session.failedMediaCount }
 
     var body: some View {
         NavigationStack {
             Group {
-                if store.session.photos.isEmpty {
-                    ContentUnavailableView("No Photos Yet", systemImage: "photo")
+                if mediaItems.isEmpty {
+                    ContentUnavailableView("No Media Yet", systemImage: "photo.on.rectangle.angled")
                 } else {
                     VStack(spacing: 8) {
                         if processingCount > 0 || failedCount > 0 {
@@ -1173,12 +1222,12 @@ struct PhotoGalleryView: View {
 
                         ScrollView {
                             LazyVGrid(columns: columns, spacing: 8) {
-                                ForEach(Array(store.session.photos.enumerated()), id: \.element.id) { index, photo in
-                                    if let image = photo.image {
-                                        Button {
-                                            selectedPhotoIndex = index
-                                        } label: {
-                                            ZStack {
+                                ForEach(Array(mediaItems.enumerated()), id: \.element.id) { index, item in
+                                    Button {
+                                        selectedMediaIndex = index
+                                    } label: {
+                                        ZStack {
+                                            if let image = item.previewImage {
                                                 Image(uiImage: image)
                                                     .resizable()
                                                     .scaledToFill()
@@ -1186,31 +1235,52 @@ struct PhotoGalleryView: View {
                                                     .frame(maxWidth: .infinity)
                                                     .clipped()
                                                     .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                                if photo.processingStatus == .processing {
-                                                    RoundedRectangle(cornerRadius: 8)
-                                                        .fill(.black.opacity(0.35))
-                                                    ProgressView()
-                                                        .tint(.white)
-                                                }
+                                            } else {
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(.white.opacity(0.08))
+                                                    .frame(height: 110)
+                                                    .overlay {
+                                                        Image(systemName: item.isVideo ? "video.fill" : "photo")
+                                                            .foregroundStyle(.white.opacity(0.55))
+                                                    }
                                             }
-                                            .overlay(alignment: .topTrailing) {
-                                                if photo.processingStatus != .ready {
-                                                    GalleryPhotoStatusBadge(status: photo.processingStatus)
-                                                        .padding(6)
-                                                }
+
+                                            if item.processingStatus == .processing {
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(.black.opacity(0.35))
+                                                ProgressView()
+                                                    .tint(.white)
                                             }
                                         }
-                                        .buttonStyle(.plain)
-                                        .contextMenu {
-                                            if let error = photo.processingError, photo.processingStatus == .failed {
-                                                Label(error, systemImage: "exclamationmark.triangle.fill")
+                                        .overlay(alignment: .center) {
+                                            if item.isVideo {
+                                                Image(systemName: "play.circle.fill")
+                                                    .font(.system(size: 24, weight: .semibold))
+                                                    .foregroundStyle(.white.opacity(0.92))
+                                                    .shadow(radius: 4)
                                             }
-                                            Button(role: .destructive) {
-                                                store.dispatch(.deleteMemoryPhoto(id: photo.id))
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
+                                        }
+                                        .overlay(alignment: .topTrailing) {
+                                            if item.processingStatus != .ready {
+                                                GalleryPhotoStatusBadge(status: item.processingStatus)
+                                                    .padding(6)
                                             }
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        if let error = item.processingError, item.processingStatus == .failed {
+                                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                        }
+
+                                        Button(role: .destructive) {
+                                            if item.isVideo {
+                                                store.dispatch(.deleteMemoryVideo(id: item.id))
+                                            } else {
+                                                store.dispatch(.deleteMemoryPhoto(id: item.id))
+                                            }
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
                                         }
                                     }
                                 }
@@ -1238,17 +1308,19 @@ struct PhotoGalleryView: View {
             }
             .sheet(
                 isPresented: Binding(
-                    get: { selectedPhotoIndex != nil },
+                    get: { selectedMediaIndex != nil },
                     set: { isPresented in
-                        if !isPresented { selectedPhotoIndex = nil }
+                        if !isPresented { selectedMediaIndex = nil }
                     }
                 )
             ) {
-                if let selectedPhotoIndex {
+                if let selectedMediaIndex {
                     GalleryMediaViewer(
-                        photos: store.session.photos,
-                        initialIndex: selectedPhotoIndex
-                    )
+                        mediaItems: mediaItems,
+                        initialIndex: selectedMediaIndex
+                    ) { photoId, prompt in
+                        store.dispatch(.animateMemoryPhoto(id: photoId, prompt: prompt))
+                    }
                 }
             }
         }
@@ -1307,48 +1379,194 @@ struct GalleryPhotoStatusBadge: View {
 }
 
 struct GalleryMediaViewer: View {
-    let photos: [ARMemoryPhoto]
+    let mediaItems: [GalleryMediaItem]
     let initialIndex: Int
+    let onAnimatePhoto: (UUID, String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIndex: Int
+    @State private var showingAnimatePrompt = false
+    @State private var animatePrompt = ""
 
-    init(photos: [ARMemoryPhoto], initialIndex: Int) {
-        self.photos = photos
+    init(mediaItems: [GalleryMediaItem], initialIndex: Int, onAnimatePhoto: @escaping (UUID, String) -> Void) {
+        self.mediaItems = mediaItems
         self.initialIndex = initialIndex
+        self.onAnimatePhoto = onAnimatePhoto
         _selectedIndex = State(initialValue: initialIndex)
+    }
+
+    private var selectedItem: GalleryMediaItem? {
+        guard mediaItems.indices.contains(selectedIndex) else { return nil }
+        return mediaItems[selectedIndex]
+    }
+
+    private var selectedPhotoId: UUID? {
+        guard let item = selectedItem, item.kind == .photo else { return nil }
+        return item.photoId
+    }
+
+    private var canAnimateSelectedItem: Bool {
+        guard let item = selectedItem else { return false }
+        return item.kind == .photo && item.processingStatus == .ready
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottom) {
                 Color.black.ignoresSafeArea()
 
                 TabView(selection: $selectedIndex) {
-                    ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
+                    ForEach(Array(mediaItems.enumerated()), id: \.element.id) { index, item in
                         ZStack {
                             Color.black.ignoresSafeArea()
-                            if let image = photo.image {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding()
+                            switch item.kind {
+                            case .photo:
+                                if let image = item.previewImage {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .padding()
+                                } else {
+                                    Image(systemName: "photo")
+                                        .font(.system(size: 36))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                }
+                            case .video:
+                                if item.processingStatus == .ready, let url = item.videoURL {
+                                    GalleryVideoPlayer(url: url)
+                                        .padding(.vertical, 50)
+                                } else {
+                                    VStack(spacing: 14) {
+                                        if let image = item.previewImage {
+                                            Image(uiImage: image)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .padding(.horizontal)
+                                        }
+                                        if item.processingStatus == .processing {
+                                            ProgressView("Generating animation...")
+                                                .tint(.white)
+                                                .foregroundStyle(.white.opacity(0.85))
+                                        } else {
+                                            Text("Animation unavailable")
+                                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(.orange)
+                                        }
+                                    }
+                                }
                             }
                         }
                         .tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
+                .onChange(of: selectedIndex) { _, _ in
+                    showingAnimatePrompt = false
+                    animatePrompt = ""
+                }
+
+                if canAnimateSelectedItem {
+                    VStack(spacing: 8) {
+                        Button {
+                            showingAnimatePrompt.toggle()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("ANIMATE")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .tracking(1)
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(.white.opacity(0.14))
+                                    .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 0.5))
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if showingAnimatePrompt {
+                            HStack(spacing: 8) {
+                                DarkTextField(placeholder: "Describe motion...", text: $animatePrompt)
+                                Button("Submit") {
+                                    submitAnimatePrompt()
+                                }
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(.white)
+                                )
+                                .disabled(animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.black.opacity(0.65))
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12), lineWidth: 0.5))
+                            )
+                            .padding(.horizontal, 14)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.bottom, 20)
+                    .animation(.easeInOut(duration: 0.2), value: showingAnimatePrompt)
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Text("\(selectedIndex + 1)/\(photos.count)")
+                    Text("\(selectedIndex + 1)/\(mediaItems.count)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.85))
                 }
             }
+        }
+    }
+
+    private func submitAnimatePrompt() {
+        guard let photoId = selectedPhotoId else { return }
+        let trimmedPrompt = animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return }
+        onAnimatePhoto(photoId, trimmedPrompt)
+        animatePrompt = ""
+        showingAnimatePrompt = false
+    }
+}
+
+struct GalleryVideoPlayer: View {
+    let url: URL
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayer(player: player)
+                    .onAppear {
+                        player.play()
+                    }
+                    .onDisappear {
+                        player.pause()
+                    }
+            } else {
+                ProgressView()
+                    .tint(.white)
+            }
+        }
+        .onAppear {
+            if player == nil {
+                player = AVPlayer(url: url)
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
         }
     }
 }

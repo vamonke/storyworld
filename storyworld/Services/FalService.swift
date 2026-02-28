@@ -9,6 +9,7 @@ actor FalService {
     private let seedream45EditEndpoint = "fal-ai/bytedance/seedream/v4.5/edit"
     private let seedream4EditEndpoint = "fal-ai/bytedance/seedream/v4/edit"
     private let flux2ProEditEndpoint = "fal-ai/flux-2-pro/edit"
+    private let seedanceFastImageToVideoEndpoint = "fal-ai/bytedance/seedance/v1/pro/fast/image-to-video"
 
     init(apiKey: String = Config.falKey) {
         self.apiKey = apiKey
@@ -191,6 +192,41 @@ actor FalService {
         }
     }
 
+    func animateImageSeedanceFast(imageData: Data, prompt: String) async throws -> URL {
+        guard !apiKey.isEmpty else {
+            throw FalServiceError.missingAPIKey
+        }
+
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else {
+            throw FalServiceError.generationFailed(reason: "Prompt is required")
+        }
+
+        let dataURI = imageData.dataURI()
+        let input: Payload = .dict([
+            "prompt": .string(trimmedPrompt),
+            "image_url": .string(dataURI),
+            "aspect_ratio": .string("auto"),
+            "resolution": .string("1080p"),
+            "duration": .string("5"),
+            "camera_fixed": .bool(false),
+            "enable_safety_checker": .bool(true)
+        ])
+
+        do {
+            let result = try await client.subscribe(to: seedanceFastImageToVideoEndpoint, input: input)
+            guard let videoURL = result["video"]["url"].stringValue else {
+                throw FalServiceError.invalidResponse
+            }
+            return try await downloadVideo(from: videoURL)
+        } catch let falError as FalServiceError {
+            throw falError
+        } catch {
+            let probe = await probeQueueFailureDetails(endpoint: seedanceFastImageToVideoEndpoint, input: input)
+            throw FalServiceError.generationFailed(reason: appendProbe(debugReason(for: error), probe: probe))
+        }
+    }
+
     private func downloadImage(from urlString: String) async throws -> Data {
         guard let url = URL(string: urlString) else { throw FalServiceError.invalidResponse }
         let (data, response) = try await URLSession.shared.data(from: url)
@@ -209,6 +245,24 @@ actor FalService {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("usdz")
+        try data.write(to: fileURL)
+        return fileURL
+    }
+
+    private func downloadVideo(from urlString: String) async throws -> URL {
+        guard let url = URL(string: urlString) else { throw FalServiceError.invalidResponse }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) {
+            throw FalServiceError.generationFailed(reason: "Failed to download generated video (HTTP \(http.statusCode))")
+        }
+        guard !data.isEmpty else {
+            throw FalServiceError.invalidResponse
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("mp4")
         try data.write(to: fileURL)
         return fileURL
     }
