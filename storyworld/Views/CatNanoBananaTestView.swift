@@ -12,6 +12,11 @@ struct CatNanoBananaTestView: View {
     @State private var isGenerating = false
     @State private var lastDuration: TimeInterval?
     @State private var errorMessage: String?
+    @State private var voiceService = VoiceService()
+    @State private var isHoldingVoiceInput = false
+    @State private var isTranscribingVoiceInput = false
+    @State private var lastTranscription = ""
+    @State private var voiceStatus = "Idle"
 
     private let falService = FalService()
 
@@ -81,6 +86,66 @@ struct CatNanoBananaTestView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
 
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Speech-to-Text Dev Test")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+
+                        HStack(spacing: 8) {
+                            HoldToTalkButton(
+                                isHolding: isHoldingVoiceInput,
+                                isProcessing: isTranscribingVoiceInput,
+                                onPress: startSpeechCapture,
+                                onRelease: finishSpeechCapture
+                            )
+
+                            Button("Replace Prompt") {
+                                applyTranscriptionToPrompt(append: false)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(lastTranscription.isEmpty)
+
+                            Button("Append Prompt") {
+                                applyTranscriptionToPrompt(append: true)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(lastTranscription.isEmpty)
+                        }
+
+                        Text("STT status: \(voiceStatus)")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.75))
+
+                        AudioLevelVisualizer(
+                            level: voiceService.audioLevel,
+                            peakLevel: voiceService.peakAudioLevel,
+                            isActive: isHoldingVoiceInput
+                        )
+
+                        if voiceService.lastCapturedBytes > 0 {
+                            Text(
+                                String(
+                                    format: "Clip: %.2fs · %d bytes · %d Hz",
+                                    voiceService.lastCapturedDuration,
+                                    voiceService.lastCapturedBytes,
+                                    voiceService.lastCapturedSampleRate
+                                )
+                            )
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.75))
+                        }
+
+                        if !lastTranscription.isEmpty {
+                            Text(lastTranscription)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.green)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.green.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
                     HStack(spacing: 10) {
                         Button(isGenerating ? "Running..." : "Run Seedream 4.5") {
                             runSeedream45()
@@ -131,6 +196,9 @@ struct CatNanoBananaTestView: View {
         }
         .task {
             loadCatIfNeeded()
+        }
+        .onDisappear {
+            resetSpeechState()
         }
     }
 
@@ -216,6 +284,61 @@ struct CatNanoBananaTestView: View {
                 }
             }
         }
+    }
+
+    private func startSpeechCapture() {
+        guard !isHoldingVoiceInput, !isTranscribingVoiceInput else { return }
+        voiceStatus = "Listening..."
+        errorMessage = nil
+        voiceService.startListening()
+        if voiceService.isListening {
+            isHoldingVoiceInput = true
+        } else {
+            voiceStatus = "Microphone unavailable"
+        }
+    }
+
+    private func finishSpeechCapture() {
+        guard isHoldingVoiceInput else { return }
+        isHoldingVoiceInput = false
+        isTranscribingVoiceInput = true
+        voiceStatus = "Transcribing..."
+
+        Task {
+            let transcription = await voiceService.stopListeningAndTranscribe()?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            await MainActor.run {
+                isTranscribingVoiceInput = false
+                if let transcription, !transcription.isEmpty {
+                    lastTranscription = transcription
+                    voiceStatus = "Captured \(transcription.count) chars"
+                } else if let transcriptionError = voiceService.lastTranscriptionError, !transcriptionError.isEmpty {
+                    voiceStatus = "Transcription failed: \(transcriptionError)"
+                } else {
+                    voiceStatus = String(format: "No speech detected (peak %.2f)", voiceService.peakAudioLevel)
+                }
+            }
+        }
+    }
+
+    private func applyTranscriptionToPrompt(append: Bool) {
+        let text = lastTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if append {
+            let spacer = prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
+            prompt += spacer + text
+        } else {
+            prompt = text
+        }
+    }
+
+    private func resetSpeechState() {
+        if voiceService.isListening {
+            voiceService.cancelListening()
+        }
+        isHoldingVoiceInput = false
+        isTranscribingVoiceInput = false
     }
 
     private func runNanoBanana() {
@@ -327,6 +450,37 @@ struct CatNanoBananaTestView: View {
         }
 
         return nil
+    }
+}
+
+private struct AudioLevelVisualizer: View {
+    let level: Float
+    let peakLevel: Float
+    let isActive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.white.opacity(0.08))
+
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isActive ? Color.green.opacity(0.8) : Color.white.opacity(0.35))
+                        .frame(width: max(4, proxy.size.width * CGFloat(level)))
+
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.yellow.opacity(0.95))
+                        .frame(width: 2, height: 12)
+                        .offset(x: max(0, proxy.size.width * CGFloat(peakLevel) - 2))
+                }
+            }
+            .frame(height: 12)
+
+            Text(String(format: "Live: %.2f  Peak: %.2f", level, peakLevel))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.75))
+        }
     }
 }
 

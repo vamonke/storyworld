@@ -27,13 +27,19 @@ actor OpenAIClient {
         request.httpBody = body
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw OpenAIError.transcriptionFailed
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIError.invalidResponse(message: "Transcription returned a non-HTTP response.")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw OpenAIError.transcriptionFailed(
+                statusCode: httpResponse.statusCode,
+                message: apiErrorMessage(from: data)
+            )
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let text = json["text"] as? String else {
-            throw OpenAIError.invalidResponse
+            throw OpenAIError.invalidResponse(message: "Transcription response did not contain text.")
         }
 
         return text
@@ -70,8 +76,14 @@ actor OpenAIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw OpenAIError.intentParsingFailed
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIError.invalidResponse(message: "Intent parsing returned a non-HTTP response.")
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw OpenAIError.intentParsingFailed(
+                statusCode: httpResponse.statusCode,
+                message: apiErrorMessage(from: data)
+            )
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -81,7 +93,7 @@ actor OpenAIClient {
               let actionData = content.data(using: .utf8),
               let actionJSON = try JSONSerialization.jsonObject(with: actionData) as? [String: String],
               let action = actionJSON["action"] else {
-            throw OpenAIError.invalidResponse
+            throw OpenAIError.invalidResponse(message: "Intent response JSON shape was unexpected.")
         }
 
         let value = actionJSON["value"] ?? ""
@@ -101,19 +113,49 @@ actor OpenAIClient {
         default: return .unknown(value)
         }
     }
+
+    private nonisolated func apiErrorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = json["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                return message
+            }
+            if let message = json["message"] as? String {
+                return message
+            }
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 enum OpenAIError: LocalizedError {
-    case transcriptionFailed
-    case intentParsingFailed
-    case invalidResponse
+    case transcriptionFailed(statusCode: Int?, message: String?)
+    case intentParsingFailed(statusCode: Int?, message: String?)
+    case invalidResponse(message: String?)
 
     var errorDescription: String? {
         switch self {
-        case .transcriptionFailed: return "Failed to transcribe audio"
-        case .intentParsingFailed: return "Failed to parse intent"
-        case .invalidResponse: return "Invalid response from OpenAI"
+        case let .transcriptionFailed(statusCode, message):
+            return format(base: "Failed to transcribe audio", statusCode: statusCode, message: message)
+        case let .intentParsingFailed(statusCode, message):
+            return format(base: "Failed to parse intent", statusCode: statusCode, message: message)
+        case let .invalidResponse(message):
+            return format(base: "Invalid response from OpenAI", statusCode: nil, message: message)
         }
+    }
+
+    private func format(base: String, statusCode: Int?, message: String?) -> String {
+        var output = base
+        if let statusCode {
+            output += " (HTTP \(statusCode))"
+        }
+        if let message, !message.isEmpty {
+            output += ": \(message)"
+        }
+        return output
     }
 }
 

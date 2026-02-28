@@ -12,8 +12,8 @@ enum TransformControlTarget: Equatable {
     var title: String {
         switch self {
         case .world: return "WORLD"
-        case .hero: return "KNIGHT"
-        case .villain: return "MONSTER"
+        case .hero: return "OBJECT A"
+        case .villain: return "OBJECT B"
         }
     }
 
@@ -26,33 +26,70 @@ enum TransformControlTarget: Equatable {
     }
 }
 
-enum WorldPreset: String, CaseIterable, Identifiable {
-    case dryGrass = "dry_grass_2k"
-    case snow = "snow_2k"
+enum CharacterCreationOption: String, CaseIterable, Identifiable {
+    case soldier
+    case monster
+    case custom
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .dryGrass: return "DRY GRASS"
-        case .snow: return "SNOW"
+        case .soldier: return "SOLDIER"
+        case .monster: return "MONSTER"
+        case .custom: return "CUSTOM"
         }
     }
 
     var icon: String {
         switch self {
-        case .dryGrass: return "leaf.fill"
-        case .snow: return "snowflake"
+        case .soldier: return "shield.fill"
+        case .monster: return "flame.fill"
+        case .custom: return "sparkles"
         }
     }
 
-    var environmentPrompt: String {
+    var presetPrompt: String? {
         switch self {
-        case .dryGrass:
-            return "epic fantasy battlefield with dry grass terrain"
-        case .snow:
-            return "epic fantasy battlefield covered in snow"
+        case .soldier:
+            return "dark soldier in obsidian armor"
+        case .monster:
+            return "fire demon with molten skin and curved horns"
+        case .custom:
+            return nil
         }
+    }
+}
+
+enum WorldPreset: String, CaseIterable, Identifiable {
+    case dirt = "rock_face_03_diff_2k"
+    case snow = "snow_02_diff_2k"
+    case pavement = "pavement"
+
+    var id: String { rawValue }
+
+    static let sharedSkyboxResourceName = "dry_grass_2k"
+
+    var title: String {
+        switch self {
+        case .dirt: return "DIRT"
+        case .snow: return "SNOW"
+        case .pavement: return "PAVEMENT"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .dirt: return "leaf.fill"
+        case .snow: return "snowflake"
+        case .pavement: return "square.grid.3x3.fill"
+        }
+    }
+
+    var floorTextureResourceName: String { rawValue }
+
+    var environmentPrompt: String {
+        "epic fantasy environment"
     }
 }
 
@@ -70,7 +107,7 @@ struct DirectorView: View {
     @State private var showingGallery = false
     @State private var activeTransformTarget: TransformControlTarget?
     @State private var worldPlaneOffset: Double = -0.22
-    @State private var selectedWorldPreset: WorldPreset = .dryGrass
+    @State private var selectedWorldPreset: WorldPreset?
     @State private var characterScaleValue: Double = 1.0
     @State private var characterYawValue: Double = 0.0
 
@@ -138,12 +175,14 @@ struct DirectorView: View {
             DirectorHUD(
                 store: store,
                 hasSurface: hasSurface,
-                selectedWorldPreset: selectedWorldPreset,
+                selectedWorldPreset: $selectedWorldPreset,
+                placementSlot: currentPlacementSlot,
                 statusMessage: placementStatusMessage,
                 onCaptureShot: captureShot,
                 onCapturePhoto: capturePhoto,
+                onPlaceCharacter: handlePlacementTap,
+                onSetWorld: setWorld,
                 onOpenGallery: { showingGallery = true },
-                onExitShooting: { store.dispatch(.exitShotMode) },
                 onExitDirector: exitDirectorMode,
                 onTapWorldBadge: openWorldControls,
                 onTapHeroBadge: { openCharacterControls(slot: .hero) },
@@ -161,14 +200,7 @@ struct DirectorView: View {
                     worldStatus: store.session.environment?.status ?? .idle,
                     onDismiss: { activeTransformTarget = nil },
                     onWorldOffsetChanged: { arManager.setWorldPlaneYOffset(Float($0)) },
-                    onSetWorld: {
-                        store.dispatch(
-                            .setEnvironment(
-                                prompt: selectedWorldPreset.environmentPrompt,
-                                localSkyboxResourceName: selectedWorldPreset.rawValue
-                            )
-                        )
-                    },
+                    onSelectWorldPreset: setWorld,
                     onCharacterScaleChanged: { value, slot in
                         arManager.setCharacterScaleMultiplier(Float(value), slot: slot)
                     },
@@ -224,9 +256,9 @@ struct DirectorView: View {
     private func characterName(for slot: CharacterSlot) -> String {
         switch slot {
         case .hero:
-            return store.session.hero?.name ?? "Knight"
+            return store.session.hero?.name ?? "Object A"
         case .villain:
-            return store.session.villain?.name ?? "Monster"
+            return store.session.villain?.name ?? "Object B"
         }
     }
 
@@ -264,6 +296,10 @@ struct DirectorView: View {
                         return
                     }
                     let loaded = try await ModelEntity(contentsOf: url)
+                    if url.lastPathComponent.hasPrefix(devSampleTextTo3DDownloadedFilenamePrefix) {
+                        let zAxisFix = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+                        loaded.orientation = simd_mul(zAxisFix, loaded.orientation)
+                    }
                     loaded.generateCollisionShapes(recursive: true)
                     baseEntities[slot] = loaded
                     sourceEntity = loaded
@@ -271,7 +307,7 @@ struct DirectorView: View {
 
                 arManager.stopPreview()
                 arManager.startPreview(with: sourceEntity)
-                placementStatusMessage = "Tap surface to place \(characterName(for: slot))"
+                placementStatusMessage = "Position preview, then press PLACE \(slot == .hero ? "OBJECT A" : "OBJECT B")"
             } catch {
                 placementStatusMessage = "Failed to load model for \(characterName(for: slot))"
             }
@@ -329,6 +365,21 @@ struct DirectorView: View {
         }
     }
 
+    private func setWorld(using preset: WorldPreset) {
+        selectedWorldPreset = preset
+        arManager.setWorldFloorTexture(resourceName: preset.floorTextureResourceName)
+        let worldStatus = store.session.environment?.status
+        let shouldGenerateWorld = worldStatus != .generating && worldStatus != .ready && worldStatus != .placed
+        guard shouldGenerateWorld else { return }
+
+        store.dispatch(
+            .setEnvironment(
+                prompt: preset.environmentPrompt,
+                localSkyboxResourceName: WorldPreset.sharedSkyboxResourceName
+            )
+        )
+    }
+
     private func openWorldControls() {
         if activeTransformTarget == .world {
             activeTransformTarget = nil
@@ -379,12 +430,14 @@ struct DirectorView: View {
 struct DirectorHUD: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
-    let selectedWorldPreset: WorldPreset
+    @Binding var selectedWorldPreset: WorldPreset?
+    let placementSlot: CharacterSlot?
     let statusMessage: String
     let onCaptureShot: (CameraAngle) -> Void
     let onCapturePhoto: () -> Void
+    let onPlaceCharacter: () -> Void
+    let onSetWorld: (WorldPreset) -> Void
     let onOpenGallery: () -> Void
-    let onExitShooting: () -> Void
     let onExitDirector: () -> Void
     let onTapWorldBadge: () -> Void
     let onTapHeroBadge: () -> Void
@@ -468,10 +521,12 @@ struct DirectorHUD: View {
                 ActionPanel(
                     store: store,
                     hasSurface: hasSurface,
-                    selectedWorldPreset: selectedWorldPreset,
+                    selectedWorldPreset: $selectedWorldPreset,
+                    placementSlot: placementSlot,
                     onCaptureShot: onCaptureShot,
                     onCapturePhoto: onCapturePhoto,
-                    onExitShooting: onExitShooting
+                    onPlaceCharacter: onPlaceCharacter,
+                    onSetWorld: onSetWorld
                 )
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
@@ -650,14 +705,14 @@ struct AssetBadge: View {
 struct TransformControlPanel: View {
     let target: TransformControlTarget
     @Binding var worldOffset: Double
-    @Binding var selectedWorldPreset: WorldPreset
+    @Binding var selectedWorldPreset: WorldPreset?
     @Binding var characterScale: Double
     @Binding var characterYaw: Double
     let hasSurface: Bool
     let worldStatus: GenerationStatus
     let onDismiss: () -> Void
     let onWorldOffsetChanged: (Double) -> Void
-    let onSetWorld: () -> Void
+    let onSelectWorldPreset: (WorldPreset) -> Void
     let onCharacterScaleChanged: (Double, CharacterSlot) -> Void
     let onCharacterYawChanged: (Double, CharacterSlot) -> Void
     let onRemoveWorld: () -> Void
@@ -681,7 +736,7 @@ struct TransformControlPanel: View {
 
                 if target == .world {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("WORLD TYPE")
+                        Text("FLOOR TYPE")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .tracking(1)
                             .foregroundStyle(.white.opacity(0.7))
@@ -691,6 +746,7 @@ struct TransformControlPanel: View {
                                 let isSelected = preset == selectedWorldPreset
                                 Button {
                                     selectedWorldPreset = preset
+                                    onSelectWorldPreset(preset)
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: preset.icon)
@@ -716,11 +772,6 @@ struct TransformControlPanel: View {
                             }
                         }
                     }
-
-                    DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
-                        onSetWorld()
-                    }
-                    .disabled(!hasSurface || worldStatus == .generating || worldStatus == .ready || worldStatus == .placed)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("WORLD Y")
@@ -791,36 +842,57 @@ struct TransformControlPanel: View {
 struct ActionPanel: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
-    let selectedWorldPreset: WorldPreset
+    @Binding var selectedWorldPreset: WorldPreset?
+    let placementSlot: CharacterSlot?
     let onCaptureShot: (CameraAngle) -> Void
     let onCapturePhoto: () -> Void
-    let onExitShooting: () -> Void
+    let onPlaceCharacter: () -> Void
+    let onSetWorld: (WorldPreset) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
             switch store.session.phase {
 
             case .idle:
-                IdlePanel(store: store, hasSurface: hasSurface, selectedWorldPreset: selectedWorldPreset)
-
-            case .generatingWorld:
-                WaitingPanel(message: "Summoning the battlefield...", subtext: "Walk around to explore")
-
-            case .placingWorld:
-                IdlePanel(store: store, hasSurface: hasSurface, selectedWorldPreset: selectedWorldPreset)
-
-            case .generatingCharacter:
-                GeneratingCharacterPanel(session: store.session, store: store)
-
-            case .placingCharacters:
-                IdlePanel(store: store, hasSurface: hasSurface, selectedWorldPreset: selectedWorldPreset)
-
-            case .takingShots:
-                PhotoCapturePanel(
+                IdlePanel(
                     store: store,
                     hasSurface: hasSurface,
+                    selectedWorldPreset: $selectedWorldPreset,
                     onCapturePhoto: onCapturePhoto,
-                    onExitShooting: onExitShooting
+                    onSetWorld: onSetWorld
+                )
+
+            case .generatingWorld:
+                WaitingPanel(message: "Summoning the environment...", subtext: "Walk around to explore")
+
+            case .placingWorld:
+                IdlePanel(
+                    store: store,
+                    hasSurface: hasSurface,
+                    selectedWorldPreset: $selectedWorldPreset,
+                    onCapturePhoto: onCapturePhoto,
+                    onSetWorld: onSetWorld
+                )
+
+            case .generatingCharacter:
+                GeneratingCharacterPanel(store: store)
+
+            case .placingCharacters:
+                PlacingCharactersPanel(
+                    store: store,
+                    currentSlot: placementSlot,
+                    hasSurface: hasSurface,
+                    onPlaceCharacter: onPlaceCharacter,
+                    onCapturePhoto: onCapturePhoto
+                )
+
+            case .takingShots:
+                IdlePanel(
+                    store: store,
+                    hasSurface: hasSurface,
+                    selectedWorldPreset: $selectedWorldPreset,
+                    onCapturePhoto: onCapturePhoto,
+                    onSetWorld: onSetWorld
                 )
 
             case .generatingClip:
@@ -838,41 +910,206 @@ struct ActionPanel: View {
 struct IdlePanel: View {
     @ObservedObject var store: FilmDirectorStore
     let hasSurface: Bool
-    let selectedWorldPreset: WorldPreset
+    @Binding var selectedWorldPreset: WorldPreset?
+    let onCapturePhoto: () -> Void
+    let onSetWorld: (WorldPreset) -> Void
+    @State private var showingWorldPicker = false
     @State private var showingCharacterPicker = false
+    @State private var selectedCharacterOption: CharacterCreationOption = .soldier
+    @State private var customCharacterPrompt = ""
+    @State private var voiceService = VoiceService()
+    @State private var isHoldingVoiceInput = false
+    @State private var isProcessingVoiceInput = false
+    @State private var voiceErrorMessage: String?
+    @State private var typingTask: Task<Void, Never>?
 
     var body: some View {
         let worldDone = store.session.environment?.status == .ready || store.session.environment?.status == .placed
-        let knightDone = store.session.hero?.status == .ready || store.session.hero?.status == .placed
-        let monsterDone = store.session.villain?.status == .ready || store.session.villain?.status == .placed
+        let objectAAdded = store.session.hero?.status == .ready || store.session.hero?.status == .placed
+        let objectBAdded = store.session.villain?.status == .ready || store.session.villain?.status == .placed
         let worldGenerating = store.session.phase == .generatingWorld
-        let knightGenerating = store.session.hero?.status == .queued || store.session.hero?.status == .generating
-        let monsterGenerating = store.session.villain?.status == .queued || store.session.villain?.status == .generating
-        let characterGenerating = knightGenerating || monsterGenerating || store.session.phase == .generatingCharacter
+        let objectAGenerating = store.session.hero?.status == .queued || store.session.hero?.status == .generating
+        let objectBGenerating = store.session.villain?.status == .queued || store.session.villain?.status == .generating
+        let characterGenerating = objectAGenerating || objectBGenerating || store.session.phase == .generatingCharacter
+        let trimmedPrompt = customCharacterPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let heroSlotUnavailable = objectAAdded || objectAGenerating
+        let villainSlotUnavailable = objectBAdded || objectBGenerating
+        let nextSlot: CharacterSlot? = {
+            if !heroSlotUnavailable { return .hero }
+            if !villainSlotUnavailable { return .villain }
+            return nil
+        }()
+        let canSubmitDraft = selectedCharacterOption == .custom ? !trimmedPrompt.isEmpty : true
+        let addButtonLabel = "ADD TO SCENE"
 
         GlassPanel {
-            if showingCharacterPicker {
-                VStack(spacing: 12) {
-                    PanelTitle("ADD CHARACTER")
+            if showingWorldPicker {
+                VStack(spacing: 10) {
+                    PanelTitle("SET WORLD")
 
-                    Text("Choose who to summon next.")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    DirectorButton(label: "ADD KNIGHT", icon: "shield.fill", style: .primary) {
-                        store.dispatch(.generateHero(prompt: "dark knight in obsidian armor"))
-                        showingCharacterPicker = false
+                    HStack(spacing: 8) {
+                        ForEach(WorldPreset.allCases) { preset in
+                            let selected = selectedWorldPreset == preset
+                            Button {
+                                selectedWorldPreset = preset
+                                onSetWorld(preset)
+                                showingWorldPicker = false
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: preset.icon)
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text(preset.title)
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .tracking(1)
+                                }
+                                .foregroundStyle(selected ? Color.black : Color.white.opacity(0.85))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(selected ? Color.white : Color.white.opacity(0.08))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(.white.opacity(selected ? 0.0 : 0.14), lineWidth: 0.5)
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(worldGenerating)
+                        }
                     }
-                    .disabled(!hasSurface || worldGenerating || knightDone || knightGenerating)
+                    .animation(nil, value: selectedWorldPreset)
 
-                    DirectorButton(label: "ADD MONSTER", icon: "flame.fill", style: .secondary) {
-                        store.dispatch(.generateVillain(prompt: "fire demon with molten skin and curved horns"))
-                        showingCharacterPicker = false
+                    if worldDone {
+                        Text("World is already in scene.")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .disabled(!hasSurface || worldGenerating || monsterDone || monsterGenerating)
 
                     DirectorButton(label: "BACK", icon: "arrow.left", style: .ghost) {
+                        showingWorldPicker = false
+                    }
+                }
+            } else if showingCharacterPicker {
+                VStack(spacing: 10) {
+                    PanelTitle("ADD CHARACTER")
+
+                    HStack(spacing: 8) {
+                        ForEach(CharacterCreationOption.allCases) { option in
+                            let selected = selectedCharacterOption == option
+                            Button {
+                                var transaction = Transaction()
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    selectedCharacterOption = option
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: option.icon)
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text(option.title)
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .tracking(1)
+                                }
+                                .foregroundStyle(selected ? Color.black : Color.white.opacity(0.85))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(selected ? Color.white : Color.white.opacity(0.08))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(.white.opacity(selected ? 0.0 : 0.14), lineWidth: 0.5)
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .animation(nil, value: selectedCharacterOption)
+
+                    if selectedCharacterOption == .custom {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Text("LOOK / STYLE PROMPT")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .tracking(1)
+                                    .foregroundStyle(.white.opacity(0.7))
+                                Spacer()
+                                HoldToTalkButton(
+                                    isHolding: isHoldingVoiceInput,
+                                    isProcessing: isProcessingVoiceInput,
+                                    onPress: startVoiceCaptureForCustomCharacter,
+                                    onRelease: finishVoiceCaptureForCustomCharacter
+                                )
+                            }
+
+                            TextEditor(text: $customCharacterPrompt)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 84, maxHeight: 120)
+                                .padding(8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(.white.opacity(0.06))
+                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.1), lineWidth: 0.5))
+                                )
+
+                            if isHoldingVoiceInput {
+                                Text("Listening... release to insert")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.green)
+                            } else if isProcessingVoiceInput {
+                                Text("Transcribing...")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.65))
+                            } else if let voiceErrorMessage {
+                                Text(voiceErrorMessage)
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+
+                    DirectorButton(
+                        label: addButtonLabel,
+                        icon: selectedCharacterOption.icon,
+                        style: .primary
+                    ) {
+                        guard let slot = nextSlot else { return }
+                        let basePrompt = selectedCharacterOption.presetPrompt ?? trimmedPrompt
+                        let prompt = selectedCharacterOption == .custom
+                            ? "\(devSampleTextTo3DMarker) \(basePrompt)"
+                            : basePrompt
+                        switch slot {
+                        case .hero:
+                            store.dispatch(.generateHero(name: nil, prompt: prompt))
+                        case .villain:
+                            store.dispatch(.generateVillain(name: nil, prompt: prompt))
+                        }
+                        customCharacterPrompt = ""
+                        resetCustomCharacterVoiceInput()
+                        showingCharacterPicker = false
+                    }
+                    .disabled(worldGenerating || nextSlot == nil || !canSubmitDraft)
+
+                    if nextSlot == nil {
+                        Text("Both object slots are already in use.")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if !canSubmitDraft {
+                        Text("Add a style prompt to generate your model.")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    DirectorButton(label: "BACK", icon: "arrow.left", style: .ghost) {
+                        customCharacterPrompt = ""
+                        resetCustomCharacterVoiceInput()
                         showingCharacterPicker = false
                     }
                 }
@@ -886,19 +1123,17 @@ struct IdlePanel: View {
 
                     HStack(spacing: 10) {
                         DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
-                            store.dispatch(
-                                .setEnvironment(
-                                    prompt: selectedWorldPreset.environmentPrompt,
-                                    localSkyboxResourceName: selectedWorldPreset.rawValue
-                                )
-                            )
+                            showingWorldPicker = true
                         }
-                        .disabled(!hasSurface || worldDone)
+                        .disabled(worldDone)
 
                         DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .secondary) {
                             showingCharacterPicker = true
                         }
-                        .disabled(!hasSurface || worldGenerating || (knightDone && monsterDone))
+                        .disabled(
+                            worldGenerating
+                            || nextSlot == nil
+                        )
                     }
 
                     if worldGenerating || characterGenerating {
@@ -908,13 +1143,92 @@ struct IdlePanel: View {
                     }
 
                     if store.session.canShoot {
-                        DirectorButton(label: "START SHOOTING", icon: "camera.aperture", style: .primary) {
-                            store.dispatch(.enterShotMode)
-                        }
+                        DirectorButton(label: "TAKE PHOTO", icon: "camera.fill", style: .primary, action: onCapturePhoto)
                     }
                 }
             }
         }
+        .onChange(of: selectedCharacterOption) { _, option in
+            if option != .custom {
+                resetCustomCharacterVoiceInput()
+            }
+        }
+        .onChange(of: showingCharacterPicker) { _, isShowing in
+            if !isShowing {
+                resetCustomCharacterVoiceInput()
+            }
+        }
+        .onDisappear {
+            resetCustomCharacterVoiceInput()
+        }
+    }
+
+    private func startVoiceCaptureForCustomCharacter() {
+        guard
+            showingCharacterPicker,
+            selectedCharacterOption == .custom,
+            !isHoldingVoiceInput,
+            !isProcessingVoiceInput
+        else { return }
+
+        voiceErrorMessage = nil
+        voiceService.startListening()
+        if voiceService.isListening {
+            isHoldingVoiceInput = true
+        } else {
+            voiceErrorMessage = "Microphone unavailable"
+        }
+    }
+
+    private func finishVoiceCaptureForCustomCharacter() {
+        guard isHoldingVoiceInput else { return }
+        isHoldingVoiceInput = false
+        isProcessingVoiceInput = true
+
+        Task {
+            let transcription = await voiceService.stopListeningAndTranscribe()?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            await MainActor.run {
+                isProcessingVoiceInput = false
+                if let transcription, !transcription.isEmpty {
+                    appendCustomPromptWithTypingAnimation(transcription)
+                } else {
+                    voiceErrorMessage = "No speech detected"
+                }
+            }
+        }
+    }
+
+    private func appendCustomPromptWithTypingAnimation(_ text: String) {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedText.isEmpty else { return }
+
+        let spacing = customCharacterPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : " "
+        let appendedText = spacing + normalizedText
+        voiceErrorMessage = nil
+
+        typingTask?.cancel()
+        typingTask = Task {
+            for character in appendedText {
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    customCharacterPrompt.append(character)
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func resetCustomCharacterVoiceInput() {
+        if voiceService.isListening {
+            voiceService.cancelListening()
+        }
+        isHoldingVoiceInput = false
+        isProcessingVoiceInput = false
+        voiceErrorMessage = nil
+        typingTask?.cancel()
+        typingTask = nil
     }
 }
 
@@ -942,84 +1256,21 @@ struct PlacingWorldPanel: View {
 // MARK: - Generating Character Panel
 
 struct GeneratingCharacterPanel: View {
-    let session: FilmSession
     @ObservedObject var store: FilmDirectorStore
 
     var body: some View {
         GlassPanel {
             VStack(spacing: 14) {
                 PanelTitle("SUMMONING")
-
-                CharacterCard(
-                    label: "KNIGHT",
-                    icon: "figure.stand",
-                    status: session.hero?.status ?? .idle
-                )
-
-                if session.heroReady {
-                    DirectorButton(label: "PLACE NOW", icon: "plus.viewfinder", style: .primary) {
-                        store.dispatch(.enterShotMode)
-                    }
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .scaleEffect(0.9)
+                    .tint(.orange)
+                DirectorButton(label: "PLACE NOW", icon: "plus.viewfinder", style: .primary) {
+                    store.dispatch(.enterShotMode)
                 }
             }
         }
-    }
-}
-
-struct CharacterCard: View {
-    let label: String
-    let icon: String
-    let status: GenerationStatus
-
-    var statusText: String {
-        switch status {
-        case .idle:       return "WAITING"
-        case .queued:     return "QUEUED"
-        case .generating: return "GENERATING"
-        case .ready:      return "READY"
-        case .placed:     return "PLACED"
-        case .failed:     return "FAILED"
-        }
-    }
-
-    var accent: Color {
-        switch status {
-        case .ready, .placed: return .yellow
-        case .generating:     return .orange
-        case .failed:         return .red
-        default:              return .white.opacity(0.3)
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 24))
-                .foregroundStyle(accent)
-
-            Text(label)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .tracking(2)
-                .foregroundStyle(.white.opacity(0.7))
-
-            Text(statusText)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(accent)
-
-            if status == .generating {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .scaleEffect(0.6)
-                    .tint(.orange)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.white.opacity(0.04))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.2), lineWidth: 0.5))
-        )
     }
 }
 
@@ -1027,22 +1278,40 @@ struct CharacterCard: View {
 
 struct PlacingCharactersPanel: View {
     @ObservedObject var store: FilmDirectorStore
+    let currentSlot: CharacterSlot?
+    let hasSurface: Bool
+    let onPlaceCharacter: () -> Void
+    let onCapturePhoto: () -> Void
+
+    private var slotLabel: String {
+        switch currentSlot {
+        case .hero: return "OBJECT A"
+        case .villain: return "OBJECT B"
+        case .none: return "OBJECT"
+        }
+    }
 
     var body: some View {
         GlassPanel {
             VStack(spacing: 14) {
                 PanelTitle("PLACE CHARACTERS")
-                Text("Tap on AR surface to place highlighted character")
+                Text("Position the highlighted preview, then place it into the scene.")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.5))
                 Text("Drag to rotate preview. Use right slider to scale.")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.35))
 
+                DirectorButton(
+                    label: "PLACE \(slotLabel)",
+                    icon: "plus.viewfinder",
+                    style: .primary,
+                    action: onPlaceCharacter
+                )
+                .disabled(currentSlot == nil || !hasSurface)
+
                 if store.session.canShoot {
-                    DirectorButton(label: "START SHOOTING", icon: "camera.aperture", style: .primary) {
-                        store.dispatch(.enterShotMode)
-                    }
+                    DirectorButton(label: "TAKE PHOTO", icon: "camera.fill", style: .primary, action: onCapturePhoto)
                 }
             }
         }
@@ -1082,52 +1351,6 @@ struct ShotPanel: View {
                     store.dispatch(.generateClip(shotIds: shotIds, style: .epicFantasy))
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-    }
-}
-
-struct PhotoCapturePanel: View {
-    @ObservedObject var store: FilmDirectorStore
-    let hasSurface: Bool
-    let onCapturePhoto: () -> Void
-    let onExitShooting: () -> Void
-
-    var body: some View {
-        GlassPanel {
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    PanelTitle("PHOTO MODE")
-                    Spacer()
-                    SurfaceBadge(hasSurface: hasSurface)
-                }
-
-                HStack(spacing: 10) {
-                    DirectorButton(
-                        label: "TAKE PHOTO",
-                        icon: "camera.fill",
-                        style: .primary,
-                        action: onCapturePhoto
-                    )
-                }
-
-                DirectorButton(
-                    label: "EXIT SHOOTING",
-                    icon: "xmark.circle",
-                    style: .ghost,
-                    action: onExitShooting
-                )
-
-                if store.session.canGenerate {
-                    DirectorButton(
-                        label: "GENERATE FILM (\(store.session.shots.count) SHOTS)",
-                        icon: "film.stack",
-                        style: .primary
-                    ) {
-                        let shotIds = store.session.shots.map(\.id)
-                        store.dispatch(.generateClip(shotIds: shotIds, style: .epicFantasy))
-                    }
-                }
             }
         }
     }

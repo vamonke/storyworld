@@ -17,6 +17,10 @@ class CharacterEntity {
         if let modelURL = character.modelURL {
             do {
                 let loaded = try await ModelEntity(contentsOf: modelURL)
+                if modelURL.lastPathComponent.hasPrefix(devSampleTextTo3DDownloadedFilenamePrefix) {
+                    let zAxisFix = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+                    loaded.orientation = simd_mul(zAxisFix, loaded.orientation)
+                }
                 loaded.generateCollisionShapes(recursive: true)
                 self.entity = loaded
                 return loaded

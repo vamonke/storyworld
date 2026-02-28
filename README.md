@@ -8,7 +8,7 @@ Built for the OpenAI Hackathon, Multi-Modal Intelligence track.
 
 ## Demo Flow
 
-1. **Describe** — Speak a hero and villain into existence (e.g. *"dark knight in obsidian armor"*, *"fire demon with molten skin"*)
+1. **Describe** — Speak a hero and villain into existence (e.g. *"dark soldier in obsidian armor"*, *"fire demon with molten skin"*)
 2. **Describe the world** — Speak an environment (e.g. *"volcanic crater at dusk, ember storm"*)
 3. **Wait (background)** — 3D models and 360° skybox generate in parallel while the camera stays live
 4. **Place** — Tap to anchor characters in AR space

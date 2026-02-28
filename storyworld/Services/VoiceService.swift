@@ -6,14 +6,27 @@ class VoiceService {
     var isListening = false
     var lastTranscription = ""
     var lastAction: VoiceDirectorAction?
+    var lastTranscriptionError: String?
+    var lastCapturedDuration: TimeInterval = 0
+    var lastCapturedBytes: Int = 0
+    var lastCapturedSampleRate: UInt32 = 0
+    var audioLevel: Float = 0
+    var peakAudioLevel: Float = 0
 
     private var audioEngine: AVAudioEngine?
     private var audioBuffer = Data()
     private let openAIClient = OpenAIClient()
+    private var currentSampleRate: UInt32 = 44100
 
     func startListening() {
         guard !isListening else { return }
         audioBuffer = Data()
+        lastTranscriptionError = nil
+        lastCapturedDuration = 0
+        lastCapturedBytes = 0
+        lastCapturedSampleRate = 0
+        audioLevel = 0
+        peakAudioLevel = 0
 
         let session = AVAudioSession.sharedInstance()
         do {
@@ -28,11 +41,17 @@ class VoiceService {
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
+        currentSampleRate = UInt32(max(1, Int(format.sampleRate.rounded())))
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             let data = self.bufferToData(buffer: buffer)
             self.audioBuffer.append(data)
+            let level = self.normalizedRMSLevel(buffer: buffer)
+            DispatchQueue.main.async {
+                self.audioLevel = level
+                self.peakAudioLevel = max(self.peakAudioLevel, level)
+            }
         }
 
         do {
@@ -49,19 +68,30 @@ class VoiceService {
         audioEngine = nil
         isListening = false
         audioBuffer = Data()
+        audioLevel = 0
+        peakAudioLevel = 0
     }
 
     func stopListeningAndTranscribe() async -> String? {
         let pcmData = stopListeningAndExtractPCM()
-        guard !pcmData.isEmpty else { return nil }
+        lastCapturedBytes = pcmData.count
+        lastCapturedSampleRate = currentSampleRate
+        lastCapturedDuration = Double(pcmData.count) / 2.0 / Double(max(currentSampleRate, 1))
 
-        let wavData = createWAV(from: pcmData)
+        guard !pcmData.isEmpty else {
+            lastTranscriptionError = "No audio was captured."
+            return nil
+        }
+
+        let wavData = createWAV(from: pcmData, sampleRate: currentSampleRate)
 
         do {
             let transcription = try await openAIClient.transcribe(audioData: wavData)
             lastTranscription = transcription
+            lastTranscriptionError = nil
             return transcription
         } catch {
+            lastTranscriptionError = error.localizedDescription
             return nil
         }
     }
@@ -83,6 +113,8 @@ class VoiceService {
         audioEngine?.stop()
         audioEngine = nil
         isListening = false
+        audioLevel = 0
+        currentSampleRate = 44100
 
         let pcmData = audioBuffer
         audioBuffer = Data()
@@ -103,8 +135,23 @@ class VoiceService {
         return data
     }
 
-    private func createWAV(from pcmData: Data) -> Data {
-        let sampleRate: UInt32 = 44100
+    private nonisolated func normalizedRMSLevel(buffer: AVAudioPCMBuffer) -> Float {
+        guard let channel = buffer.floatChannelData?[0] else { return 0 }
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return 0 }
+
+        var sumSquares: Float = 0
+        for i in 0..<frameLength {
+            let sample = channel[i]
+            sumSquares += sample * sample
+        }
+
+        let rms = sqrt(sumSquares / Float(frameLength))
+        // Boost RMS for a clearer UI meter in quiet environments.
+        return min(max(rms * 10, 0), 1)
+    }
+
+    private func createWAV(from pcmData: Data, sampleRate: UInt32) -> Data {
         let channels: UInt16 = 1
         let bitsPerSample: UInt16 = 16
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)

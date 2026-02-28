@@ -114,7 +114,7 @@ ARClip
 
 | Slot | Role | Example prompt |
 |---|---|---|
-| `.hero` | Warrior, protagonist | "dark knight in obsidian armor, glowing red runes" |
+| `.hero` | Warrior, protagonist | "dark soldier in obsidian armor, glowing red runes" |
 | `.villain` | Monster, antagonist | "fire demon with molten skin and curved horns" |
 
 Characters are referred to by slot internally. Names are extracted from voice prompts by GPT-5.
@@ -169,7 +169,7 @@ User taps button
   → UI returns to AR camera immediately
   → On completion: dispatch(completionAction) on MainActor
   → autoAdvancePhase() runs
-  → Notification toast appears ("⚔️ Knight ready — tap to place")
+  → Notification toast appears ("⚔️ Soldier ready — tap to place")
 ```
 
 Asset status lifecycle: `idle → queued → generating → ready → placed`
@@ -182,12 +182,12 @@ Phase and asset status are independent. A clip can be `generating` while phase i
 
 ### Always visible
 - Phase badge (top center) — current `ProductionPhase` with breathing dot when generating
-- Asset status row — `World`, `Knight`, `Monster` badges showing `GenerationStatus` color
+- Asset status row — `World`, `Soldier`, `Monster` badges showing `GenerationStatus` color
 
 ### Phase-specific panels (bottom sheet)
 - **idle** — text fields for env/hero/villain prompts + "SUMMON ALL" button
 - **generatingWorld / generatingCharacter** — progress indicator, subtext "keep exploring"
-- **placingCharacters** — "PLACE KNIGHT" / "PLACE MONSTER" buttons, "START SHOOTING" CTA
+- **placingCharacters** — "PLACE SOLDIER" / "PLACE MONSTER" buttons, "START SHOOTING" CTA
 - **takingShots** — 6 shot type buttons in 2×3 grid, "GENERATE FILM" appears after shot 3
 - **generatingClip** — minimal indicator, user stays in AR
 - **reviewingClip** — PLAY / MORE SHOTS / RESET
@@ -215,18 +215,18 @@ Phase and asset status are independent. A clip can be `generating` while phase i
 **6-shot sequence:**
 1. Wide establishing — both characters, environment visible, slow push in
 2. Medium two-shot — standoff tension, between the characters
-3. Low angle on hero — knight looming, heroic
+3. Low angle on hero — soldier looming, heroic
 4. Monster close-up — face/horns, menacing
-5. Over-the-shoulder — from knight's back, monster facing camera
+5. Over-the-shoulder — from soldier's back, monster facing camera
 6. Wide pull — both in frame, environment, the moment before battle
 
 **Kling 3.0 prompt structure:**
 ```
-Shot 1 (0-3s): Wide establishing, [knight] and [monster] face off in [env], slow push in
+Shot 1 (0-3s): Wide establishing, [soldier] and [monster] face off in [env], slow push in
 Shot 2 (3-5.5s): Medium two-shot, tension, [env] background
-Shot 3 (5.5-8s): Low angle heroic on [knight], looming, powerful
+Shot 3 (5.5-8s): Low angle heroic on [soldier], looming, powerful
 Shot 4 (8-10s): Close-up [monster] face, embers floating, intense
-Shot 5 (10-12.5s): Over-shoulder from [knight] toward [monster]
+Shot 5 (10-12.5s): Over-shoulder from [soldier] toward [monster]
 Shot 6 (12.5-15s): Wide pull-back, lightning, epic scale
 
 Audio: [cinematicStyle.audioPrompt]

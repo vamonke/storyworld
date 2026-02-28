@@ -3,6 +3,9 @@ import RealityKit
 import ARKit
 import Combine
 
+let devSampleTextTo3DMarker = "[[DEV_SAMPLE_3D]]"
+let devSampleTextTo3DDownloadedFilenamePrefix = "dev_text_to_3d_"
+
 // MARK: - ProductionPhase
 
 enum ProductionPhase: String, Codable, CaseIterable {
@@ -45,8 +48,8 @@ enum ProductionPhase: String, Codable, CaseIterable {
 // MARK: - Supporting Enums
 
 enum CharacterSlot: String, Codable, CaseIterable {
-    case hero    // knight — always slot 1
-    case villain // monster — always slot 2
+    case hero    // object A — always slot 1
+    case villain // object B — always slot 2
 }
 
 enum GenerationStatus: String, Codable {
@@ -143,11 +146,14 @@ struct ARCharacter: Identifiable, Codable {
     // Not codable — runtime only
     var anchorIdentifier: UUID?
 
-    static func hero(prompt: String) -> ARCharacter {
-        ARCharacter(
+    static func hero(name: String? = nil, prompt: String) -> ARCharacter {
+        let resolvedName = name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (resolvedName?.isEmpty == false) ? resolvedName! : "Object A"
+        return ARCharacter(
             id: UUID(),
             slot: .hero,
-            name: "Knight",
+            name: displayName,
             voicePrompt: prompt,
             generationPrompt: "",
             status: .queued,
@@ -156,11 +162,14 @@ struct ARCharacter: Identifiable, Codable {
         )
     }
 
-    static func villain(prompt: String) -> ARCharacter {
-        ARCharacter(
+    static func villain(name: String? = nil, prompt: String) -> ARCharacter {
+        let resolvedName = name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (resolvedName?.isEmpty == false) ? resolvedName! : "Object B"
+        return ARCharacter(
             id: UUID(),
             slot: .villain,
-            name: "Monster",
+            name: displayName,
             voicePrompt: prompt,
             generationPrompt: "",
             status: .queued,
@@ -298,8 +307,8 @@ enum DirectorAction {
     case setEnvironment(prompt: String, localSkyboxResourceName: String?)
 
     // Characters
-    case generateHero(prompt: String)
-    case generateVillain(prompt: String)
+    case generateHero(name: String?, prompt: String)
+    case generateVillain(name: String?, prompt: String)
 
     // Background completions (fired by pollers)
     case environmentReady(panoramaURL: URL)
@@ -363,6 +372,7 @@ final class FilmDirectorStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var hasShownCinematicFailure = false
     private var hasSeededDefaultGalleryPhoto = false
+    private let shouldAutoSeedDefaultGalleryPhoto = false
 
     init(
         generationService: GenerationServiceProtocol = MockGenerationService(),
@@ -371,8 +381,10 @@ final class FilmDirectorStore: ObservableObject {
         self.generationService = generationService
         self.arScene = arScene
 
-        Task { [weak self] in
-            await self?.seedDefaultGalleryPhotoIfNeeded()
+        if shouldAutoSeedDefaultGalleryPhoto {
+            Task { [weak self] in
+                await self?.seedDefaultGalleryPhotoIfNeeded()
+            }
         }
     }
 
@@ -401,7 +413,7 @@ final class FilmDirectorStore: ObservableObject {
                 session.environment?.panoramaURL = localSkyboxURL
                 session.environment?.status = .ready
                 arScene.applySkybox(localSkyboxURL)
-                notify("🌍 Battlefield ready", icon: "globe.europe.africa.fill")
+                notify("🌍 Environment ready", icon: "globe.europe.africa.fill")
                 autoAdvancePhase()
                 return
             }
@@ -420,14 +432,14 @@ final class FilmDirectorStore: ObservableObject {
             session.environment?.panoramaURL = url
             session.environment?.status = .ready
             arScene.applySkybox(url)                       // auto-apply, non-blocking
-            notify("🌍 Battlefield ready", icon: "globe.europe.africa.fill")
+            notify("🌍 Environment ready", icon: "globe.europe.africa.fill")
 
             // AUTO-ADVANCE
             autoAdvancePhase()
 
         // MARK: Characters
 
-        case .generateHero(let prompt):
+        case .generateHero(let name, let prompt):
             if session.phase == .generatingWorld {
                 notify("Finish setting world first", icon: "pause.circle")
                 return
@@ -436,10 +448,11 @@ final class FilmDirectorStore: ObservableObject {
                 || session.hero?.status == .generating
                 || session.hero?.status == .ready
                 || session.hero?.status == .placed {
-                notify("Knight already added", icon: "checkmark.circle")
+                let existingName = session.hero?.name ?? "Object A"
+                notify("\(existingName) already added", icon: "checkmark.circle")
                 return
             }
-            var character = ARCharacter.hero(prompt: prompt)
+            var character = ARCharacter.hero(name: name, prompt: prompt)
             character.generationPrompt = PromptExpander.character(prompt, slot: .hero)
             session.hero = character
             session.phase = .generatingCharacter
@@ -453,7 +466,7 @@ final class FilmDirectorStore: ObservableObject {
                 }
             }
 
-        case .generateVillain(let prompt):
+        case .generateVillain(let name, let prompt):
             if session.phase == .generatingWorld {
                 notify("Finish setting world first", icon: "pause.circle")
                 return
@@ -462,10 +475,11 @@ final class FilmDirectorStore: ObservableObject {
                 || session.villain?.status == .generating
                 || session.villain?.status == .ready
                 || session.villain?.status == .placed {
-                notify("Monster already added", icon: "checkmark.circle")
+                let existingName = session.villain?.name ?? "Object B"
+                notify("\(existingName) already added", icon: "checkmark.circle")
                 return
             }
-            var character = ARCharacter.villain(prompt: prompt)
+            var character = ARCharacter.villain(name: name, prompt: prompt)
             character.generationPrompt = PromptExpander.character(prompt, slot: .villain)
             session.villain = character
 
@@ -484,17 +498,17 @@ final class FilmDirectorStore: ObservableObject {
             }
 
         case .heroReady(let url):
-            let heroURL = Bundle.main.url(forResource: "rex", withExtension: "usdz") ?? url
-            session.hero?.modelURL = heroURL
+            session.hero?.modelURL = url
             session.hero?.status = .ready
-            notify("⚔️ Knight ready — tap to place", icon: "figure.stand")
+            let heroName = session.hero?.name ?? "Object A"
+            notify("⚔️ \(heroName) ready — tap to place", icon: "figure.stand")
             autoAdvancePhase()
 
         case .villainReady(let url):
-            let villainURL = Bundle.main.url(forResource: "spider_creature", withExtension: "usdz") ?? url
-            session.villain?.modelURL = villainURL
+            session.villain?.modelURL = url
             session.villain?.status = .ready
-            notify("🔥 Monster ready — tap to place", icon: "flame.fill")
+            let villainName = session.villain?.name ?? "Object B"
+            notify("🔥 \(villainName) ready — tap to place", icon: "flame.fill")
             autoAdvancePhase()
 
         case .generationFailed(let slot, let error):
@@ -509,13 +523,15 @@ final class FilmDirectorStore: ObservableObject {
         case .placeHero(let anchorId):
             session.hero?.anchorIdentifier = anchorId
             session.hero?.status = .placed
-            notify("⚔️ Knight placed", icon: "checkmark.circle.fill")
+            let heroName = session.hero?.name ?? "Object A"
+            notify("⚔️ \(heroName) placed", icon: "checkmark.circle.fill")
             autoAdvancePhase()
 
         case .placeVillain(let anchorId):
             session.villain?.anchorIdentifier = anchorId
             session.villain?.status = .placed
-            notify("🔥 Monster placed", icon: "checkmark.circle.fill")
+            let villainName = session.villain?.name ?? "Object B"
+            notify("🔥 \(villainName) placed", icon: "checkmark.circle.fill")
             autoAdvancePhase()
 
         // MARK: Shots
@@ -742,11 +758,13 @@ final class FilmDirectorStore: ObservableObject {
         case .clearCharacter(let slot):
             switch slot {
             case .hero:
+                let heroName = session.hero?.name ?? "Object A"
                 session.hero = nil
-                notify("⚔️ Knight removed", icon: "trash")
+                notify("⚔️ \(heroName) removed", icon: "trash")
             case .villain:
+                let villainName = session.villain?.name ?? "Object B"
                 session.villain = nil
-                notify("🔥 Monster removed", icon: "trash")
+                notify("🔥 \(villainName) removed", icon: "trash")
             }
             arScene.removeCharacter(slot: slot)
             if session.phase == .takingShots {
@@ -758,8 +776,10 @@ final class FilmDirectorStore: ObservableObject {
             hasShownCinematicFailure = false
             hasSeededDefaultGalleryPhoto = false
             arScene.reset()
-            Task { [weak self] in
-                await self?.seedDefaultGalleryPhotoIfNeeded()
+            if shouldAutoSeedDefaultGalleryPhoto {
+                Task { [weak self] in
+                    await self?.seedDefaultGalleryPhotoIfNeeded()
+                }
             }
         }
     }
@@ -818,6 +838,7 @@ final class FilmDirectorStore: ObservableObject {
     }
 
     private func seedDefaultGalleryPhotoIfNeeded() async {
+        guard shouldAutoSeedDefaultGalleryPhoto else { return }
         guard !hasSeededDefaultGalleryPhoto else { return }
         hasSeededDefaultGalleryPhoto = true
 
@@ -930,9 +951,9 @@ enum PromptExpander {
     }
 
     static func shot(angle: CameraAngle, session: FilmSession, index: Int) -> String {
-        let env = session.environment?.voicePrompt ?? "fantasy battlefield"
-        let hero = session.hero?.name ?? "warrior"
-        let villain = session.villain?.name ?? "monster"
+        let env = session.environment?.voicePrompt ?? "fantasy environment"
+        let hero = session.hero?.name ?? "Object A"
+        let villain = session.villain?.name ?? "Object B"
 
         switch angle {
         case .wideEstablishing:
@@ -953,9 +974,9 @@ enum PromptExpander {
     }
 
     static func cinematicShotEdit(angle: CameraAngle, session: FilmSession, index: Int) -> String {
-        let env = session.environment?.voicePrompt ?? "fantasy battlefield"
-        let hero = session.hero?.name ?? "warrior"
-        let villain = session.villain?.name ?? "monster"
+        let env = session.environment?.voicePrompt ?? "fantasy environment"
+        let hero = session.hero?.name ?? "Object A"
+        let villain = session.villain?.name ?? "Object B"
 
         return """
         You are a senior VFX compositor and colorist. Transform this 3D-rendered frame into a photorealistic live-action movie still while preserving the exact composition.
@@ -1068,6 +1089,8 @@ final class MockGenerationService: GenerationServiceProtocol {
 final class HybridGenerationService: GenerationServiceProtocol {
     private let fallback: GenerationServiceProtocol
     private let falService: FalService
+    private let useDevSampleTextTo3DResponse = true
+    private let devSampleTextTo3DModelURLString = "https://v3b.fal.media/files/b/0a903ff3/QfJZ0sdXC86T8QAKp_M7K_base_basic_shaded.usdz"
 
     init(
         fallback: GenerationServiceProtocol = MockGenerationService(),
@@ -1082,7 +1105,14 @@ final class HybridGenerationService: GenerationServiceProtocol {
     }
 
     func generateCharacter(_ prompt: String) async throws -> URL {
-        try await fallback.generateCharacter(prompt)
+        let shouldUseDevSample = useDevSampleTextTo3DResponse && prompt.contains(devSampleTextTo3DMarker)
+        if shouldUseDevSample {
+            return try await downloadDevSampleCharacterModel()
+        }
+        let sanitizedPrompt = prompt
+            .replacingOccurrences(of: devSampleTextTo3DMarker, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await fallback.generateCharacter(sanitizedPrompt)
     }
 
     func generateClip(frames: [UIImage], shots: [ARShot], style: CinematicStyle, audioPrompt: String) async throws -> URL {
@@ -1095,5 +1125,38 @@ final class HybridGenerationService: GenerationServiceProtocol {
 
     func animateImageToVideo(imageData: Data, prompt: String) async throws -> URL {
         try await falService.animateImageSeedanceFast(imageData: imageData, prompt: prompt)
+    }
+
+    private func downloadDevSampleCharacterModel() async throws -> URL {
+        guard let modelURL = URL(string: devSampleTextTo3DModelURLString) else {
+            throw NSError(
+                domain: "HybridGenerationService",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid dev sample model URL"]
+            )
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: modelURL)
+        if let http = response as? HTTPURLResponse,
+           !(200...299).contains(http.statusCode) {
+            throw NSError(
+                domain: "HybridGenerationService",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to download dev sample model (HTTP \(http.statusCode))"]
+            )
+        }
+        guard !data.isEmpty else {
+            throw NSError(
+                domain: "HybridGenerationService",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Dev sample model download returned empty data"]
+            )
+        }
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(devSampleTextTo3DDownloadedFilenamePrefix)\(UUID().uuidString)")
+            .appendingPathExtension("usdz")
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
     }
 }

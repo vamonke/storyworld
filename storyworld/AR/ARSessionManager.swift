@@ -19,12 +19,17 @@ final class ARSessionManager: ARSceneProtocol {
     private var worldPlaneEntity: ModelEntity?
     private let ciContext = CIContext()
     private var worldPlaneYOffset: Float = -0.22
-    private let floorTextureResourceName = "rock_face_03_diff_2k"
+    private var floorTextureResourceName = "rock_face_03_diff_2k"
+    private var floorTextureFileExtension = "jpg"
     private let floorFallbackColor = UIColor(red: 0.31, green: 0.27, blue: 0.21, alpha: 0.92)
     private var placedCharacters: [CharacterSlot: ModelEntity] = [:]
     private var placedCharacterAnchors: [CharacterSlot: AnchorEntity] = [:]
     private var characterScaleMultipliers: [CharacterSlot: Float] = [:]
     private var characterYawDegrees: [CharacterSlot: Float] = [:]
+    private var characterBaseOrientations: [CharacterSlot: simd_quatf] = [:]
+    private let identityOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    private var previewBaseOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    private var lastPlacementYawDegrees: Float = 0
 
     // Y-axis rotation controlled by drag gesture
     var previewYRotation: Float = 0
@@ -62,6 +67,8 @@ final class ARSessionManager: ARSceneProtocol {
         // Create a semi-transparent clone as the preview
         let preview = entity.clone(recursive: true)
         preview.scale = SIMD3<Float>(repeating: 0.3)
+        previewBaseOrientation = entity.orientation
+        preview.orientation = composedOrientation(yawRadians: previewYRotation, base: previewBaseOrientation)
 
         // Make it semi-transparent
         if var model = preview.model {
@@ -89,6 +96,7 @@ final class ARSessionManager: ARSceneProtocol {
         }
         previewEntity = nil
         previewAnchor = nil
+        previewBaseOrientation = identityOrientation
     }
 
     private func startPreviewUpdates() {
@@ -116,7 +124,7 @@ final class ARSessionManager: ARSceneProtocol {
             previewAnchor?.transform.translation = position
             let s = 0.3 * previewScaleMultiplier
             previewEntity?.scale = SIMD3<Float>(repeating: s)
-            previewEntity?.orientation = simd_quatf(angle: previewYRotation, axis: SIMD3<Float>(0, 1, 0))
+            previewEntity?.orientation = composedOrientation(yawRadians: previewYRotation, base: previewBaseOrientation)
             previewEntity?.isEnabled = true
             currentHitPosition = position
             hasValidPlacement = true
@@ -135,7 +143,8 @@ final class ARSessionManager: ARSceneProtocol {
         let anchor = AnchorEntity(world: position)
         let s = 0.3 * previewScaleMultiplier
         entity.scale = SIMD3<Float>(repeating: s)
-        entity.orientation = simd_quatf(angle: previewYRotation, axis: SIMD3<Float>(0, 1, 0))
+        entity.orientation = composedOrientation(yawRadians: previewYRotation, base: entity.orientation)
+        lastPlacementYawDegrees = previewYRotation * 180 / .pi
         anchor.addChild(entity)
         arView.scene.addAnchor(anchor)
 
@@ -176,7 +185,7 @@ final class ARSessionManager: ARSceneProtocol {
             arView.environment.lighting.intensityExponent = 1.0
         }
 
-        // Add a visible "battlefield" ground so world setup has a clear AR result.
+        // Add a visible "environment" ground so world setup has a clear AR result.
         let groundAnchor = AnchorEntity(world: currentHitPosition ?? SIMD3<Float>(0, -0.5, -1.5))
         let ground = ModelEntity(
             mesh: .generatePlane(width: 4.0, depth: 4.0),
@@ -212,6 +221,9 @@ final class ARSessionManager: ARSceneProtocol {
         placedCharacterAnchors = [:]
         characterScaleMultipliers = [:]
         characterYawDegrees = [:]
+        characterBaseOrientations = [:]
+        previewBaseOrientation = identityOrientation
+        lastPlacementYawDegrees = 0
         for anchor in arView.scene.anchors {
             arView.scene.removeAnchor(anchor)
         }
@@ -234,13 +246,25 @@ final class ARSessionManager: ARSceneProtocol {
         worldPlaneEntity?.position.y = offset
     }
 
+    func setWorldFloorTexture(resourceName: String, fileExtension: String = "jpg") {
+        floorTextureResourceName = resourceName
+        floorTextureFileExtension = fileExtension
+        if let worldPlaneEntity {
+            applyFloorTextureIfAvailable(to: worldPlaneEntity)
+        }
+    }
+
     func registerPlacedCharacter(_ entity: ModelEntity, slot: CharacterSlot) {
         placedCharacters[slot] = entity
         if let anchor = entity.anchor as? AnchorEntity {
             placedCharacterAnchors[slot] = anchor
         }
         characterScaleMultipliers[slot] = max(entity.scale.x / 0.3, 0.01)
-        characterYawDegrees[slot] = yawDegrees(for: entity.orientation)
+        let yaw = lastPlacementYawDegrees
+        characterYawDegrees[slot] = yaw
+        let yawOrientation = simd_quatf(angle: yaw * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+        characterBaseOrientations[slot] = simd_mul(simd_inverse(yawOrientation), entity.orientation)
+        lastPlacementYawDegrees = 0
     }
 
     func characterScaleMultiplier(for slot: CharacterSlot) -> Float {
@@ -257,16 +281,25 @@ final class ARSessionManager: ARSceneProtocol {
     }
 
     func characterYawDegrees(for slot: CharacterSlot) -> Float {
-        if let entity = placedCharacters[slot] {
-            return yawDegrees(for: entity.orientation)
+        if let yaw = characterYawDegrees[slot] {
+            return yaw
         }
-        return characterYawDegrees[slot] ?? 0
+        if let entity = placedCharacters[slot] {
+            let computed = yawDegrees(for: entity.orientation)
+            characterYawDegrees[slot] = computed
+            let yawOrientation = simd_quatf(angle: computed * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+            characterBaseOrientations[slot] = simd_mul(simd_inverse(yawOrientation), entity.orientation)
+            return computed
+        }
+        return 0
     }
 
     func setCharacterYawDegrees(_ degrees: Float, slot: CharacterSlot) {
         characterYawDegrees[slot] = degrees
         let radians = degrees * .pi / 180
-        placedCharacters[slot]?.orientation = simd_quatf(angle: radians, axis: SIMD3<Float>(0, 1, 0))
+        let yawOrientation = simd_quatf(angle: radians, axis: SIMD3<Float>(0, 1, 0))
+        let baseOrientation = characterBaseOrientations[slot] ?? identityOrientation
+        placedCharacters[slot]?.orientation = simd_mul(yawOrientation, baseOrientation)
     }
 
     func hasPlacedCharacter(_ slot: CharacterSlot) -> Bool {
@@ -290,6 +323,12 @@ final class ARSessionManager: ARSceneProtocol {
         placedCharacterAnchors[slot] = nil
         characterScaleMultipliers[slot] = nil
         characterYawDegrees[slot] = nil
+        characterBaseOrientations[slot] = nil
+    }
+
+    private func composedOrientation(yawRadians: Float, base: simd_quatf) -> simd_quatf {
+        let yawOrientation = simd_quatf(angle: yawRadians, axis: SIMD3<Float>(0, 1, 0))
+        return simd_mul(yawOrientation, base)
     }
 
     private func yawDegrees(for orientation: simd_quatf) -> Float {
@@ -302,10 +341,11 @@ final class ARSessionManager: ARSceneProtocol {
 
     private func applyFloorTextureIfAvailable(to ground: ModelEntity) {
         guard
-            let textureURL = Bundle.main.url(forResource: floorTextureResourceName, withExtension: "jpg"),
+            let textureURL = Bundle.main.url(forResource: floorTextureResourceName, withExtension: floorTextureFileExtension),
             let image = UIImage(contentsOfFile: textureURL.path),
             let cgImage = image.cgImage
         else {
+            ground.model?.materials = [makeMatteFloorMaterial()]
             return
         }
 
@@ -315,7 +355,7 @@ final class ARSessionManager: ARSceneProtocol {
                 let material = makeMatteFloorMaterial(texture: texture)
                 ground.model?.materials = [material]
             } catch {
-                // Keep fallback color material when texture loading fails.
+                ground.model?.materials = [makeMatteFloorMaterial()]
             }
         }
     }
