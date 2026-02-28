@@ -844,92 +844,75 @@ struct IdlePanel: View {
     @State private var showingCharacterPicker = false
 
     var body: some View {
+        let worldDone = store.session.environment?.status == .ready || store.session.environment?.status == .placed
+        let knightDone = store.session.hero?.status == .ready || store.session.hero?.status == .placed
+        let monsterDone = store.session.villain?.status == .ready || store.session.villain?.status == .placed
+        let worldGenerating = store.session.phase == .generatingWorld
+        let knightGenerating = store.session.hero?.status == .queued || store.session.hero?.status == .generating
+        let monsterGenerating = store.session.villain?.status == .queued || store.session.villain?.status == .generating
+        let characterGenerating = knightGenerating || monsterGenerating || store.session.phase == .generatingCharacter
+
         GlassPanel {
-            VStack(spacing: 16) {
-                PanelTitle("SCENE SETUP")
+            if showingCharacterPicker {
+                VStack(spacing: 12) {
+                    PanelTitle("ADD CHARACTER")
 
-                HStack(spacing: 8) {
-                    StatusChip(title: "WORLD", done: store.session.environment?.status == .ready || store.session.environment?.status == .placed)
-                    StatusChip(title: "KNIGHT", done: store.session.hero?.status == .ready || store.session.hero?.status == .placed)
-                    StatusChip(title: "MONSTER", done: store.session.villain?.status == .ready || store.session.villain?.status == .placed)
+                    Text("Choose who to summon next.")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    DirectorButton(label: "ADD KNIGHT", icon: "shield.fill", style: .primary) {
+                        store.dispatch(.generateHero(prompt: "dark knight in obsidian armor"))
+                        showingCharacterPicker = false
+                    }
+                    .disabled(!hasSurface || worldGenerating || knightDone || knightGenerating)
+
+                    DirectorButton(label: "ADD MONSTER", icon: "flame.fill", style: .secondary) {
+                        store.dispatch(.generateVillain(prompt: "fire demon with molten skin and curved horns"))
+                        showingCharacterPicker = false
+                    }
+                    .disabled(!hasSurface || worldGenerating || monsterDone || monsterGenerating)
+
+                    DirectorButton(label: "BACK", icon: "arrow.left", style: .ghost) {
+                        showingCharacterPicker = false
+                    }
                 }
+            } else {
+                VStack(spacing: 16) {
+                    PanelTitle("SCENE SETUP")
 
-                let worldDone = store.session.environment?.status == .ready || store.session.environment?.status == .placed
-                let knightDone = store.session.hero?.status == .ready || store.session.hero?.status == .placed
-                let monsterDone = store.session.villain?.status == .ready || store.session.villain?.status == .placed
-                let worldGenerating = store.session.phase == .generatingWorld
-                let knightGenerating = store.session.hero?.status == .queued || store.session.hero?.status == .generating
-                let monsterGenerating = store.session.villain?.status == .queued || store.session.villain?.status == .generating
-                let characterGenerating = knightGenerating || monsterGenerating || store.session.phase == .generatingCharacter
-
-                HStack(spacing: 10) {
-                    DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
-                        store.dispatch(
-                            .setEnvironment(
-                                prompt: selectedWorldPreset.environmentPrompt,
-                                localSkyboxResourceName: selectedWorldPreset.rawValue
+                    HStack(spacing: 10) {
+                        DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
+                            store.dispatch(
+                                .setEnvironment(
+                                    prompt: selectedWorldPreset.environmentPrompt,
+                                    localSkyboxResourceName: selectedWorldPreset.rawValue
+                                )
                             )
-                        )
-                    }
-                    .disabled(!hasSurface || worldDone)
-
-                    DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .primary) {
-                        showingCharacterPicker = true
-                    }
-                    .disabled(!hasSurface || worldGenerating || (knightDone && monsterDone))
-                    .confirmationDialog("Add character", isPresented: $showingCharacterPicker, titleVisibility: .visible) {
-                        Button("Knight") {
-                            store.dispatch(.generateHero(prompt: "dark knight in obsidian armor"))
                         }
-                        Button("Monster") {
-                            store.dispatch(.generateVillain(prompt: "fire demon with molten skin and curved horns"))
+                        .disabled(!hasSurface || worldDone)
+
+                        DirectorButton(label: "ADD CHARACTER", icon: "person.2.fill", style: .primary) {
+                            showingCharacterPicker = true
                         }
-                        Button("Custom") {
-                            // Placeholder for custom character flow.
-                        }
-                        Button("Cancel", role: .cancel) {}
+                        .disabled(!hasSurface || worldGenerating || (knightDone && monsterDone))
                     }
-                }
 
-                if worldGenerating || characterGenerating {
-                    Text(worldGenerating ? "Setting world..." : "Adding character...")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
+                    if worldGenerating || characterGenerating {
+                        Text(worldGenerating ? "Setting world..." : "Adding character...")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
 
-                if store.session.canShoot {
-                    DirectorButton(label: "START SHOOTING", icon: "camera.aperture", style: .primary) {
-                        store.dispatch(.enterShotMode)
+                    if store.session.canShoot {
+                        DirectorButton(label: "START SHOOTING", icon: "camera.aperture", style: .primary) {
+                            store.dispatch(.enterShotMode)
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-struct StatusChip: View {
-    let title: String
-    let done: Bool
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 10))
-            Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .tracking(1)
-        }
-        .foregroundStyle(done ? .green : .white.opacity(0.45))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke((done ? Color.green : Color.white).opacity(0.2), lineWidth: 0.5)
-                )
-        )
     }
 }
 
@@ -1513,7 +1496,7 @@ struct GalleryMediaViewer: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 50)
                     .animation(.easeInOut(duration: 0.2), value: showingAnimatePrompt)
                 }
             }
