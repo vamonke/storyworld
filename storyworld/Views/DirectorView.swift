@@ -64,7 +64,7 @@ struct DirectorView: View {
     @State private var arManager = ARSessionManager()
     @State private var baseEntities: [CharacterSlot: ModelEntity] = [:]
     @State private var currentPlacementSlot: CharacterSlot?
-    @State private var placementStatusMessage = "Summon characters, then tap to place."
+    @State private var placementStatusMessage = ""
     @State private var scaleValue: Double = 1.0
     @State private var hasSurface = false
     @State private var showingGallery = false
