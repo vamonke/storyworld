@@ -38,8 +38,11 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(.white)
                         )
+                    }
 
-                        Button("CAT SEEDREAM TEST") {
+                    VStack {
+                        Spacer()
+                        Button("IMAGE TEST") {
                             screen = .catSeedream
                         }
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -50,6 +53,7 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(.white.opacity(0.14))
                         )
+                        .padding(.bottom, 40)
                     }
                 }
             }
