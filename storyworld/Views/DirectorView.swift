@@ -1037,6 +1037,11 @@ struct IdlePanel: View {
                                     .tracking(1)
                                     .foregroundStyle(.white.opacity(0.7))
                                 Spacer()
+                                if !trimmedPrompt.isEmpty {
+                                    ClearPromptButton {
+                                        clearCustomCharacterPrompt()
+                                    }
+                                }
                                 HoldToTalkButton(
                                     isHolding: isHoldingVoiceInput,
                                     isProcessing: isProcessingVoiceInput,
@@ -1218,6 +1223,11 @@ struct IdlePanel: View {
                 try? await Task.sleep(for: .milliseconds(16))
             }
         }
+    }
+
+    private func clearCustomCharacterPrompt() {
+        customCharacterPrompt = ""
+        resetCustomCharacterVoiceInput()
     }
 
     private func resetCustomCharacterVoiceInput() {
@@ -1627,6 +1637,10 @@ struct GalleryMediaViewer: View {
         return item.kind == .photo && item.processingStatus == .ready
     }
 
+    private var hasAnimatePromptContent: Bool {
+        !animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -1716,6 +1730,11 @@ struct GalleryMediaViewer: View {
                                         onPress: startVoiceCapture,
                                         onRelease: finishVoiceCapture
                                     )
+                                    if hasAnimatePromptContent {
+                                        ClearPromptButton {
+                                            clearAnimatePrompt()
+                                        }
+                                    }
                                     Button("Submit") {
                                         submitAnimatePrompt()
                                     }
@@ -1775,6 +1794,11 @@ struct GalleryMediaViewer: View {
         .onDisappear {
             resetVoiceInput()
         }
+    }
+
+    private func clearAnimatePrompt() {
+        animatePrompt = ""
+        resetVoiceInput()
     }
 
     private func submitAnimatePrompt() {
@@ -2209,6 +2233,34 @@ struct HoldToTalkButton: View {
         if isProcessing { return "WAIT" }
         if isHolding { return "RELEASE" }
         return "HOLD"
+    }
+}
+
+struct ClearPromptButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("CLEAR")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.6)
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.white.opacity(0.14), lineWidth: 0.6)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
