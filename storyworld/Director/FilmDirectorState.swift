@@ -958,21 +958,23 @@ enum PromptExpander {
         let villain = session.villain?.name ?? "monster"
 
         return """
-        You are a senior colorist and DI artist. Transform this into a cinematic movie still while preserving the exact composition.
-        Preserve exactly: framing, crop, lens perspective, camera position, character identity, facial features, pose, hand placement, costume, props, and environment layout.
+        You are a senior VFX compositor and colorist. Transform this 3D-rendered frame into a photorealistic live-action movie still while preserving the exact composition.
+        Preserve exactly: framing, crop, lens perspective, camera position, character identity, facial features, pose, hand placement, costume design, props, and environment layout.
         Do not add/remove subjects, do not reframe, do not zoom, and do not add text or watermark.
-        Repair 3D/render artifacts while preserving silhouette and intent: fix broken topology, non-manifold-looking surfaces, clipping/intersections, UV seams/stretching, texture misalignment, low-poly faceting, jagged edges, z-fighting, and shading/bake glitches. Replace placeholder or low-resolution materials with coherent, physically plausible detail that matches the original design.
-        Apply cinematic finishing: filmic color grading, richer dynamic range, controlled highlights, soft highlight roll-off, clean skin tones, nuanced shadow contrast, subtle atmospheric depth, and premium blockbuster polish.
+        Photorealism pass — eliminate all traces of CG and video-game appearance: replace synthetic-looking surfaces with real-world materials (natural skin with visible pores and subtle subsurface scattering, fabric with real weave and micro-wrinkles, metal with genuine oxidation and surface imperfection, stone/ground with dirt, wear, and micro-detail). Add real-world optical cues: slight natural lens blur on depth planes, organic film grain (ISO 800 equivalent), subtle chromatic fringing at high-contrast edges, and real-world contact shadows and ambient occlusion.
+        Repair remaining CG artifacts: fix non-manifold seams, UV stretching, z-fighting, flat baked shading, and over-smooth normals.
+        Apply cinematic finishing only — do not relocate, add, or intensify light sources or shadow direction: preserve the existing lighting setup and shadow placement exactly. Apply a teal-and-orange color grade (warm amber/orange midtones and highlights, desaturated teal/cyan in shadows), gentle highlight roll-off without clipping, clean compressed midtones, and premium Hollywood blockbuster polish.
         Keep continuity with this scene: \(env). Subject context: \(hero) versus \(villain). Shot \(index), \(angle.displayName).
         """
     }
 
     static func cinematicMemoryPhotoEdit() -> String {
         """
-        You are a senior colorist and DI artist. Transform this image into a cinematic movie still while preserving exact composition.
+        You are a senior VFX compositor and colorist. Transform this image into a photorealistic live-action movie still while preserving exact composition.
         Preserve exactly: framing, crop, lens perspective, subject identity, facial features, pose, and background layout.
         Do not add/remove subjects, do not reframe, do not zoom, do not change geometry, and do not add text or watermark.
-        Apply only cinematic finishing: filmic color grading, richer dynamic range, controlled highlights, soft highlight roll-off, nuanced shadow contrast, subtle atmospheric depth, and premium blockbuster polish.
+        Photorealism pass — eliminate any synthetic or CG-looking surfaces: replace them with real-world materials (natural skin with visible pores and subtle subsurface scattering, fabric with real weave and micro-wrinkles, hard surfaces with real-world wear and imperfection). Add real-world optical cues: slight natural lens blur on depth planes, organic film grain (ISO 800 equivalent), subtle chromatic fringing at high-contrast edges, and real-world contact shadows.
+        Apply cinematic finishing only — do not relocate, add, or intensify light sources or shadow direction: preserve the existing lighting setup and shadow placement exactly. Apply a teal-and-orange color grade (warm amber/orange midtones and highlights, desaturated teal/cyan in shadows), gentle highlight roll-off without clipping, clean compressed midtones, and premium Hollywood blockbuster polish.
         """
     }
 }

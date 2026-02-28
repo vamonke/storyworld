@@ -484,7 +484,7 @@ struct DirectorHUD: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 .animation(.spring(response: 0.4, dampingFraction: 0.75), value: store.notifications.count)
-                .padding(.top, 132)
+                .padding(.top, 116)
                 Spacer()
             }
 
