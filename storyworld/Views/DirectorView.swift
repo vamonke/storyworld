@@ -440,7 +440,6 @@ struct DirectorHUD: View {
 
                 GenerationStatusRow(
                     session: store.session,
-                    hasSurface: hasSurface,
                     onTapWorld: onTapWorldBadge,
                     onTapHero: onTapHeroBadge,
                     onTapVillain: onTapVillainBadge
@@ -550,14 +549,12 @@ struct BreathingDot: View {
 
 struct GenerationStatusRow: View {
     let session: FilmSession
-    let hasSurface: Bool
     let onTapWorld: () -> Void
     let onTapHero: () -> Void
     let onTapVillain: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            SurfaceBadge(hasSurface: hasSurface)
             AssetBadge(label: "World", status: session.environment?.status ?? .idle, icon: "globe", action: onTapWorld)
             if let hero = session.hero {
                 AssetBadge(label: hero.name, status: hero.status, icon: "figure.stand", action: onTapHero)
@@ -821,6 +818,7 @@ struct ActionPanel: View {
             case .takingShots:
                 PhotoCapturePanel(
                     store: store,
+                    hasSurface: hasSurface,
                     onCapturePhoto: onCapturePhoto,
                     onExitShooting: onExitShooting
                 )
@@ -880,7 +878,11 @@ struct IdlePanel: View {
                 }
             } else {
                 VStack(spacing: 16) {
-                    PanelTitle("SCENE SETUP")
+                    HStack(spacing: 10) {
+                        PanelTitle("SCENE SETUP")
+                        Spacer()
+                        SurfaceBadge(hasSurface: hasSurface)
+                    }
 
                     HStack(spacing: 10) {
                         DirectorButton(label: "SET WORLD", icon: "globe.europe.africa.fill", style: .secondary) {
@@ -1087,13 +1089,18 @@ struct ShotPanel: View {
 
 struct PhotoCapturePanel: View {
     @ObservedObject var store: FilmDirectorStore
+    let hasSurface: Bool
     let onCapturePhoto: () -> Void
     let onExitShooting: () -> Void
 
     var body: some View {
         GlassPanel {
             VStack(spacing: 10) {
-                PanelTitle("PHOTO MODE")
+                HStack(spacing: 10) {
+                    PanelTitle("PHOTO MODE")
+                    Spacer()
+                    SurfaceBadge(hasSurface: hasSurface)
+                }
 
                 HStack(spacing: 10) {
                     DirectorButton(
