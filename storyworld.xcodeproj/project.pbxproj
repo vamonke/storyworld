@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EF912A052F51A42600B92DCC /* FalClient in Frameworks */ = {isa = PBXBuildFile; productRef = EF912A042F51A42600B92DCC /* FalClient */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		EFBBB1052F512ACA00603C67 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EF912A052F51A42600B92DCC /* FalClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = storyworld;
 			packageProductDependencies = (
+				EF912A042F51A42600B92DCC /* FalClient */,
 			);
 			productName = storyworld;
 			productReference = EFBBB0F72F512AC700603C67 /* storyworld.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = EFBBB0EE2F512AC700603C67;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EF912A032F51A42600B92DCC /* XCRemoteSwiftPackageReference "fal-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EFBBB0F82F512AC700603C67 /* Products */;
 			projectDirPath = "";
@@ -395,8 +404,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M55V7CQ5J7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "StoryWorld needs camera access to capture photos of people and for AR experiences.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StoryWorld needs microphone access for voice commands to direct scenes.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StoryWorld needs photo library access to save generated videos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -426,8 +439,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M55V7CQ5J7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "StoryWorld needs camera access to capture photos of people and for AR experiences.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "StoryWorld needs microphone access for voice commands to direct scenes.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "StoryWorld needs photo library access to save generated videos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -570,6 +587,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EF912A032F51A42600B92DCC /* XCRemoteSwiftPackageReference "fal-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/fal-ai/fal-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.5.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EF912A042F51A42600B92DCC /* FalClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EF912A032F51A42600B92DCC /* XCRemoteSwiftPackageReference "fal-swift" */;
+			productName = FalClient;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EFBBB0EF2F512AC700603C67 /* Project object */;
 }
