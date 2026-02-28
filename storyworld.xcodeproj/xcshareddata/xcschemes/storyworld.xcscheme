@@ -77,13 +77,13 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "FAL_KEY"
-            value = "e9983500-88fe-4db1-ba76-9330877bf279:583703713c8753949a00fd988b43cff3"
-            isEnabled = "YES">
+            value = ""
+            isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "OPENAI_API_KEY"
-            value = "sk-proj-IwwBrh6hgZAzrNcGCLk8dAnsa9BVJ9xsBKGKPXI-58BZlAMM1PxnguW&#10;  8AUBoT53HM6RPadMl5kT3BlbkFJHuXsVA00uExVkSrw-rvcOD7UfW9TOpahl_S0pdQMku34weqrvj7Khq&#10;  alTBkfIorRcQFtQQsYkA"
-            isEnabled = "YES">
+            value = ""
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
