@@ -19,7 +19,7 @@ actor OpenAIClient {
 
         var body = Data()
         // Model field
-        body.appendMultipart(boundary: boundary, name: "model", value: "whisper-1")
+        body.appendMultipart(boundary: boundary, name: "model", value: "gpt-4o-mini-transcribe")
         // Audio file
         body.appendMultipart(boundary: boundary, name: "file", filename: "audio.wav", mimeType: "audio/wav", data: audioData)
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)

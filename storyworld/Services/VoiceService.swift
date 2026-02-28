@@ -13,6 +13,7 @@ class VoiceService {
 
     func startListening() {
         guard !isListening else { return }
+        audioBuffer = Data()
 
         let session = AVAudioSession.sharedInstance()
         do {
@@ -42,27 +43,50 @@ class VoiceService {
         }
     }
 
-    func stopListeningAndProcess() async -> VoiceDirectorAction? {
+    func cancelListening() {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
         isListening = false
-
-        guard !audioBuffer.isEmpty else { return nil }
-
-        let wavData = createWAV(from: audioBuffer)
         audioBuffer = Data()
+    }
+
+    func stopListeningAndTranscribe() async -> String? {
+        let pcmData = stopListeningAndExtractPCM()
+        guard !pcmData.isEmpty else { return nil }
+
+        let wavData = createWAV(from: pcmData)
 
         do {
             let transcription = try await openAIClient.transcribe(audioData: wavData)
             lastTranscription = transcription
+            return transcription
+        } catch {
+            return nil
+        }
+    }
 
+    func stopListeningAndProcess() async -> VoiceDirectorAction? {
+        guard let transcription = await stopListeningAndTranscribe() else { return nil }
+
+        do {
             let action = try await openAIClient.parseIntent(text: transcription)
             lastAction = action
             return action
         } catch {
             return nil
         }
+    }
+
+    private func stopListeningAndExtractPCM() -> Data {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        isListening = false
+
+        let pcmData = audioBuffer
+        audioBuffer = Data()
+        return pcmData
     }
 
     private nonisolated func bufferToData(buffer: AVAudioPCMBuffer) -> Data {

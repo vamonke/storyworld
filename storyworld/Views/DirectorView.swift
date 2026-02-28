@@ -1376,6 +1376,11 @@ struct GalleryMediaViewer: View {
     @State private var selectedIndex: Int
     @State private var showingAnimatePrompt = false
     @State private var animatePrompt = ""
+    @State private var voiceService = VoiceService()
+    @State private var isHoldingVoiceInput = false
+    @State private var isProcessingVoiceInput = false
+    @State private var voiceErrorMessage: String?
+    @State private var typingTask: Task<Void, Never>?
 
     init(mediaItems: [GalleryMediaItem], initialIndex: Int, onAnimatePhoto: @escaping (UUID, String) -> Void) {
         self.mediaItems = mediaItems
@@ -1452,6 +1457,7 @@ struct GalleryMediaViewer: View {
                 .onChange(of: selectedIndex) { _, _ in
                     showingAnimatePrompt = false
                     animatePrompt = ""
+                    resetVoiceInput()
                 }
 
                 if canAnimateSelectedItem {
@@ -1478,20 +1484,45 @@ struct GalleryMediaViewer: View {
                         .buttonStyle(.plain)
 
                         if showingAnimatePrompt {
-                            HStack(spacing: 8) {
-                                DarkTextField(placeholder: "Describe motion...", text: $animatePrompt)
-                                Button("Submit") {
-                                    submitAnimatePrompt()
+                            VStack(spacing: 8) {
+                                HStack(spacing: 8) {
+                                    DarkTextField(placeholder: "Describe motion...", text: $animatePrompt)
+                                    HoldToTalkButton(
+                                        isHolding: isHoldingVoiceInput,
+                                        isProcessing: isProcessingVoiceInput,
+                                        onPress: startVoiceCapture,
+                                        onRelease: finishVoiceCapture
+                                    )
+                                    Button("Submit") {
+                                        submitAnimatePrompt()
+                                    }
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.black)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(.white)
+                                    )
+                                    .disabled(animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                 }
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(.white)
-                                )
-                                .disabled(animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                                if isHoldingVoiceInput {
+                                    Text("Listening... release to insert")
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.green)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else if isProcessingVoiceInput {
+                                    Text("Transcribing...")
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.65))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else if let voiceErrorMessage {
+                                    Text(voiceErrorMessage)
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.orange)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
                             }
                             .padding(10)
                             .background(
@@ -1515,8 +1546,11 @@ struct GalleryMediaViewer: View {
                     Text("\(selectedIndex + 1)/\(mediaItems.count)")
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.85))
-                }
+                    }
             }
+        }
+        .onDisappear {
+            resetVoiceInput()
         }
     }
 
@@ -1527,6 +1561,69 @@ struct GalleryMediaViewer: View {
         onAnimatePhoto(photoId, trimmedPrompt)
         animatePrompt = ""
         showingAnimatePrompt = false
+        resetVoiceInput()
+    }
+
+    private func startVoiceCapture() {
+        guard showingAnimatePrompt, !isHoldingVoiceInput, !isProcessingVoiceInput else { return }
+        voiceErrorMessage = nil
+        voiceService.startListening()
+        if voiceService.isListening {
+            isHoldingVoiceInput = true
+        } else {
+            voiceErrorMessage = "Microphone unavailable"
+        }
+    }
+
+    private func finishVoiceCapture() {
+        guard isHoldingVoiceInput else { return }
+        isHoldingVoiceInput = false
+        isProcessingVoiceInput = true
+
+        Task {
+            let transcription = await voiceService.stopListeningAndTranscribe()?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            await MainActor.run {
+                isProcessingVoiceInput = false
+                if let transcription, !transcription.isEmpty {
+                    appendPromptWithTypingAnimation(transcription)
+                } else {
+                    voiceErrorMessage = "No speech detected"
+                }
+            }
+        }
+    }
+
+    private func appendPromptWithTypingAnimation(_ text: String) {
+        let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedText.isEmpty else { return }
+
+        let spacing = animatePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : " "
+        let appendedText = spacing + normalizedText
+        voiceErrorMessage = nil
+
+        typingTask?.cancel()
+        typingTask = Task {
+            for character in appendedText {
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    animatePrompt.append(character)
+                }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func resetVoiceInput() {
+        if voiceService.isListening {
+            voiceService.cancelListening()
+        }
+        isHoldingVoiceInput = false
+        isProcessingVoiceInput = false
+        voiceErrorMessage = nil
+        typingTask?.cancel()
+        typingTask = nil
     }
 }
 
@@ -1845,6 +1942,50 @@ struct DarkTextField: View {
                     .fill(.white.opacity(0.06))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.1), lineWidth: 0.5))
             )
+    }
+}
+
+struct HoldToTalkButton: View {
+    let isHolding: Bool
+    let isProcessing: Bool
+    let onPress: () -> Void
+    let onRelease: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: isProcessing ? "waveform" : "mic.fill")
+                .font(.system(size: 12, weight: .semibold))
+            Text(labelText)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .tracking(0.6)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isHolding ? Color.red.opacity(0.78) : Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isHolding ? .red.opacity(0.35) : .white.opacity(0.14), lineWidth: 0.6)
+                )
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    onPress()
+                }
+                .onEnded { _ in
+                    onRelease()
+                }
+        )
+        .opacity(isProcessing ? 0.72 : 1.0)
+    }
+
+    private var labelText: String {
+        if isProcessing { return "WAIT" }
+        if isHolding { return "RELEASE" }
+        return "HOLD"
     }
 }
 
